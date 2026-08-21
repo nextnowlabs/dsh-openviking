@@ -173,10 +173,15 @@ pnpm run typecheck    # server + client 的 no-emit 类型检查
 `scripts/publish.sh` 负责发布到 npmjs 官方 registry：
 
 ```bash
-npm run publish:dry           # dry-run：构建 + 预览 tarball，不发布
+npm run release                 # 发布到 npmjs（等价于 ./scripts/publish.sh）
+npm run publish:dry             # dry-run：构建 + 预览 tarball，不发布
 ./scripts/publish.sh --bump patch --push   # 升级 patch 版并发布 + 推送 git tag
 ./scripts/publish.sh --tag beta            # 发布为 beta dist-tag
 ```
+
+> 注意：不要直接运行裸 `npm publish`。`publish` 是 npm 的生命周期脚本名，
+> npm 在上传完成后会再次执行它，导致 publish.sh 递归重入并报“版本已存在”。
+> 统一使用 `npm run release`（或直接调用 `./scripts/publish.sh`）。
 
 发布前会自动检查：位于 `main` 分支、工作区干净（`--skip-checks` 可跳过）、已登录 npmjs、版本号未被占用。需要二步验证时用 `-o <otp>` 或 `NPM_OTP` 环境变量。首次发布先执行 `npm login --registry https://registry.npmjs.org/`。
 

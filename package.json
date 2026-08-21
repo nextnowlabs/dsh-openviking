@@ -48,7 +48,7 @@
     "prepack": "npm run build",
     "test": "vitest run tests",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.public.json",
-    "publish": "bash scripts/publish.sh",
+    "release": "bash scripts/publish.sh",
     "publish:dry": "bash scripts/publish.sh --dry-run"
   },
   "dsh": {

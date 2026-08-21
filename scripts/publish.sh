@@ -50,6 +50,14 @@ die() {
   exit 1
 }
 
+# `publish` 是 npm 的生命周期脚本名：`npm publish` 上传 tarball 完成后会再次
+# 执行名为 publish 的脚本。若本脚本被 npm 以该生命周期形式调用，说明发生了
+# 递归重入（0.2.3 事故：包已发布成功，嵌套的 publish.sh 却报“版本已存在”并
+# 让整个 npm publish 以失败退出）。请使用 `npm run release` 发布。
+if [[ "${npm_lifecycle_event:-}" == "publish" ]]; then
+  die "scripts/publish.sh 被 npm 的 publish 生命周期钩子重入；请改用 npm run release"
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -n|--dry-run) DRY_RUN=1 ;;
