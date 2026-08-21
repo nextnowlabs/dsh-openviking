@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { SettingsConflictError, type SettingsDescriptor } from '@deepseek-ai/dsh-settings'
+import { SettingsConflictError, type SettingsDescriptor, type SettingsProvider } from '@deepseek-ai/dsh-settings'
 // Type-only imports activate the optional webServer Context declaration.
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import {
@@ -70,10 +70,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function descriptorOf(ctx: Context): SettingsDescriptor {
-  const descriptor = ctx.settings.describe().find(row => row.ns === OPENVIKING_SETTINGS_NAMESPACE)
+/**
+ * Resolve the settings service without an inject declaration. The web handler
+ * runs on the plugin entry context, whose `inject` list deliberately omits
+ * `settings` (the settings dependence is optional for host profiles), so a
+ * direct `ctx.settings` access throws "cannot get property without inject" —
+ * the plugin group's isolated entry cannot resolve undeclared services.
+ * `ctx.get()` reads the root service store without the inject requirement and
+ * returns `undefined` when this deployment mounts no settings provider.
+ */
+function settingsOf(ctx: Context): SettingsProvider {
+  const settings = ctx.get('settings') as SettingsProvider | undefined
+  if (settings === undefined) {
+    throw new Error('settings service is absent: this deployment does not mount a settings provider')
+  }
+  return settings
+}
+
+function descriptorFrom(settings: SettingsProvider): SettingsDescriptor {
+  const descriptor = settings.describe().find(row => row.ns === OPENVIKING_SETTINGS_NAMESPACE)
   if (descriptor === undefined) throw new Error('openviking Settings namespace is not registered')
   return descriptor
+}
+
+function descriptorOf(ctx: Context): SettingsDescriptor {
+  return descriptorFrom(settingsOf(ctx))
 }
 
 function responseJson<T>(res: ServerResponse, status: number, body: JsonResponse<T>): void {
@@ -154,13 +175,14 @@ export class OpenVikingWebBackend {
 
   /** Build the current settings/credential snapshot without secrets. */
   async snapshot(): Promise<OpenVikingSettingsSnapshot> {
-    const descriptor = descriptorOf(this.ctx)
+    const settings = settingsOf(this.ctx)
+    const descriptor = descriptorFrom(settings)
     const value = descriptor.value as OpenVikingSettings
     const resolved = resolveConfig(value)
     const credential = await this.ctx.credentials.describe(resolved.credential)
     return {
       schemaVersion: 1,
-      writable: this.ctx.settings.writable,
+      writable: settings.writable,
       settings: {
         value,
         ...(descriptor.user === undefined ? {} : { user: descriptor.user }),

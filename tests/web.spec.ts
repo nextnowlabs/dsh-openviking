@@ -176,4 +176,47 @@ describe('OpenVikingWebBackend', () => {
     expect(body.value.credential.ref).toBe('OPENVIKING_CUSTOM_KEY')
     expect(body.value.credential.configured).toBe(false)
   })
+
+  it('serves the snapshot from a plugin child context whose inject list omits settings (production shape)', async () => {
+    // The plugin entry runs inside an isolated cordis group and declares
+    // `inject: ['agents', 'sessions', 'tools', 'skills', 'credentials']` —
+    // deliberately WITHOUT `settings` (the settings dependence is optional for
+    // host profiles). A direct `ctx.settings` access on such a context throws
+    // "cannot get property \"settings\" without inject", which surfaced as the
+    // 503 'settings-unavailable' the browser Settings section saw. The backend
+    // must resolve settings through `ctx.get()` instead.
+    const root = new Context()
+    contexts.push(root)
+    await root.plugin(MemorySettings)
+    const credentialService = credentials()
+    root.provide('credentials', credentialService)
+    root.settings.register(OPENVIKING_SETTINGS_NAMESPACE, Config, {
+      base: {}, applies: 'live', validate: (value) => { resolveConfig(value) },
+    })
+
+    let pluginCtx: Context | undefined
+    await root.plugin({
+      inject: ['credentials'],
+      apply(child: Context) { pluginCtx = child },
+    })
+    if (pluginCtx === undefined) throw new Error('plugin child did not apply')
+
+    const backend = new OpenVikingWebBackend(pluginCtx)
+    const server = createServer((req, res) => { void backend.handle(req, res) })
+    servers.push(server)
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => { resolve() })
+    })
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('server did not bind')
+    const base = `http://127.0.0.1:${address.port}`
+
+    const response = await fetch(base)
+    const body = await response.json() as { ok: true; value: { credential: { configured: boolean } } }
+
+    expect(response.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(body.value.credential.configured).toBe(true)
+  })
 })
