@@ -34,7 +34,7 @@ describe('bundle shape', () => {
     )) as Record<string, unknown>
     const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
 
-    expect(manifest.name).toBe('@openviking/dsh-memory-plugin')
+    expect(manifest.name).toBe('@nextnowlabs/dsh-openviking')
     expect(manifest.dependencies).toBeUndefined()
     // dsh constructors come from peers the installation heals at runtime.
     // Peers are FLEXIBLE ranges (^0.1.0-rc.6) because DSH rc releases move fast

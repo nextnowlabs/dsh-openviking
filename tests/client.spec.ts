@@ -144,4 +144,177 @@ describe('OpenVikingClient', () => {
     expect(response.error?.code).toBe('FAILED')
     expect(response.traceId).toBe('trace-error')
   })
+
+  it('requests the agent tree contract for directory trees', async () => {
+    let seenUrl = ''
+    globalThis.fetch = async (url) => {
+      seenUrl = String(url)
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: [{ uri: 'viking://resources', rel_path: 'notes.md', isDir: false }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    expect(await client.tree('viking://resources', { levelLimit: 2 })).toEqual([
+      { uri: 'viking://resources', rel_path: 'notes.md', isDir: false },
+    ])
+    expect(seenUrl).toBe(
+      'http://127.0.0.1:1933/api/v1/fs/tree?uri=viking%3A%2F%2Fresources&output=agent&level_limit=2',
+    )
+  })
+
+  it('writes content through the content API', async () => {
+    let seen: { url: string, body: Record<string, unknown> }
+    globalThis.fetch = async (url, init) => {
+      seen = { url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> }
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: { uri: 'viking://notes.md', written_bytes: 11, mode: 'create' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    const response = await client.writeContent('viking://notes.md', 'hello world', { mode: 'create' })
+
+    expect(response.ok).toBe(true)
+    expect(seen.url).toBe('http://127.0.0.1:1933/api/v1/content/write')
+    expect(seen.body).toEqual({
+      uri: 'viking://notes.md',
+      content: 'hello world',
+      mode: 'create',
+    })
+  })
+
+  it('edits content through read-then-write and guards replace counts', async () => {
+    let written: string | undefined
+    globalThis.fetch = async (url, init) => {
+      const asString = String(url)
+      if (asString.includes('/content/read')) {
+        return new Response(JSON.stringify({ status: 'ok', result: 'a viking:// marker here' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (asString.includes('/content/write')) {
+        written = (JSON.parse(String(init?.body)) as Record<string, unknown>).content as string
+        return new Response(JSON.stringify({
+          status: 'ok',
+          result: { uri: 'viking://notes.md', written_bytes: 1 },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ status: 'ok', result: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    const result = await client.editContent(
+      'viking://notes.md',
+      'marker',
+      'replaced',
+      { replaceAll: true },
+    )
+
+    expect(result.ok).toBe(true)
+    expect(written).toBe('a viking:// replaced here')
+  })
+
+  it('refuses ambiguous edits unless replace_all is set', async () => {
+    globalThis.fetch = async (url) => {
+      const asString = String(url)
+      if (asString.includes('/content/read')) {
+        return new Response(JSON.stringify({ status: 'ok', result: 'a a' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ status: 'ok', result: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    const result = await client.editContent('viking://notes.md', 'a', 'b')
+
+    expect(result.ok).toBe(false)
+    expect(result.message).toMatch(/matches 2 times; pass replace_all/)
+  })
+
+  it('searches contents with grep and maps the result envelope', async () => {
+    let seenBody: Record<string, unknown>
+    globalThis.fetch = async (_url, init) => {
+      seenBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: {
+          matches: [{ uri: 'viking://notes.md', line: 3, content: 'a match line' }],
+          count: 1,
+          match_count: 1,
+          files_scanned: 2,
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    const result = await client.grep('match', { uri: 'viking://', caseInsensitive: true })
+
+    expect(seenBody).toEqual({ pattern: 'match', uri: 'viking://', case_insensitive: true })
+    expect(result.match_count).toBe(1)
+    expect(result.matches?.[0]).toEqual({ uri: 'viking://notes.md', line: 3, content: 'a match line' })
+  })
+
+  it('finds files with glob and extracts the matches list', async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      status: 'ok',
+      result: { matches: [{ uri: 'viking://a.md' }, { uri: 'viking://b.md' }], count: 2 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const client = clientWith({})
+
+    expect(await client.glob('**/*.md')).toEqual([
+      { uri: 'viking://a.md' },
+      { uri: 'viking://b.md' },
+    ])
+  })
+
+  it('lists and cancels watch tasks', async () => {
+    let seenUrl = ''
+    globalThis.fetch = async (url, init) => {
+      seenUrl = `${String(url)}|${init?.method ?? 'GET'}`
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: { tasks: [{ task_id: 't1', to_uri: 'viking://notes.md', is_active: true }], total: 1 },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    expect(await client.listWatches()).toEqual([
+      { task_id: 't1', to_uri: 'viking://notes.md', is_active: true },
+    ])
+    expect(seenUrl).toBe('http://127.0.0.1:1933/api/v1/watches|GET')
+
+    const cancelResult = await client.cancelWatch('viking://notes.md')
+    expect(cancelResult).toBe(true)
+    expect(seenUrl).toBe('http://127.0.0.1:1933/api/v1/watches?to_uri=viking%3A%2F%2Fnotes.md|DELETE')
+  })
 })

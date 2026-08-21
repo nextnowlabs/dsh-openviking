@@ -49,7 +49,9 @@
     "build": "node scripts/clean-build.mjs && tsc -p tsconfig.json && tsc -p tsconfig.client.json && node scripts/build-client.mjs",
     "prepack": "npm run build",
     "test": "vitest run tests",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.public.json"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.public.json",
+    "publish": "bash scripts/publish.sh",
+    "publish:dry": "bash scripts/publish.sh --dry-run"
   },
   "dsh": {
     "bundle": {

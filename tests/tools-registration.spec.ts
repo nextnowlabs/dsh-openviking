@@ -5,7 +5,7 @@ import { registerOpenVikingTools } from '../src/tools.ts'
 // @deepseek-ai/dsh-tools defineTool, so this test fails when a dsh rc pin
 // bump changes the ToolDefinition contract these tools rely on.
 describe('tool registration', () => {
-  it('registers all seven tools as valid dsh ToolDefinitions', () => {
+  it('registers all fourteen tools as valid dsh ToolDefinitions', () => {
     const registered: Array<Record<string, unknown>> = []
     const ctx = { tools: { register: definition => registered.push(definition as never) } }
     registerOpenVikingTools(ctx, {} as never, {} as never)
@@ -18,6 +18,13 @@ describe('tool registration', () => {
       'viking_forget',
       'viking_add_resource',
       'viking_archive_expand',
+      'viking_tree',
+      'viking_write',
+      'viking_edit',
+      'viking_grep',
+      'viking_glob',
+      'viking_list_watches',
+      'viking_cancel_watch',
     ])
     for (const definition of registered) {
       expect(typeof definition.execute).toBe('function')
@@ -32,6 +39,13 @@ describe('tool registration', () => {
         viking_forget: { uri: 'viking://x' },
         viking_add_resource: { url: 'https://y' },
         viking_archive_expand: { archive_id: 'archive_001' },
+        viking_tree: { uri: 'viking://' },
+        viking_write: { uri: 'viking://notes.md', content: 'x' },
+        viking_edit: { uri: 'viking://notes.md', old_string: 'a', new_string: 'b' },
+        viking_grep: { pattern: 'foo' },
+        viking_glob: { pattern: '**/*.md' },
+        viking_list_watches: {},
+        viking_cancel_watch: { uri: 'viking://notes.md' },
       }
       const view = (definition.presentCall as (args: Record<string, unknown>) => Record<string, unknown>)(
         VALID_ARGS[definition.name as string]!,

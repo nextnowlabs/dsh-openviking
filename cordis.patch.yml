@@ -6,4 +6,4 @@
         openvikingMemory: true
       config:
         - id: openviking-memory-runtime
-          name: '@openviking/dsh-memory-plugin'
+          name: '@nextnowlabs/dsh-openviking'

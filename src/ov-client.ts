@@ -35,6 +35,59 @@ export interface FetchOptions {
   actorPeerId?: string
 }
 
+/** Options shared by filesystem content tools (tree/grep/glob). */
+export interface FsToolOptions {
+  /** Starting OpenViking URI; the tools supply the default root. */
+  uri?: string
+  /** Maximum number of nodes/matches to return. */
+  nodeLimit?: number
+  /** Maximum depth to traverse. */
+  levelLimit?: number
+  /** Case-insensitive matching (grep only). */
+  caseInsensitive?: boolean
+  /** Per-session actor peer override. */
+  actorPeerId?: string
+}
+
+/** Result of `GET /api/v1/fs/tree` (agent output). */
+export interface TreeEntry {
+  uri: string
+  rel_path: string
+  isDir: boolean
+  size?: number
+  modTime?: string
+  abstract?: string
+}
+
+/** Result of `POST /api/v1/search/grep`. */
+export interface GrepResult {
+  matches?: Array<{ uri?: string, line?: number, content?: string }>
+  count?: number
+  match_count?: number
+  files_scanned?: number
+}
+
+/** One match from `POST /api/v1/search/glob`. */
+export interface GlobEntry {
+  uri: string
+  [key: string]: unknown
+}
+
+/** A watch task as returned by `GET /api/v1/watches`. */
+export interface WatchTask {
+  task_id: string
+  path: string
+  to_uri?: string
+  parent_uri?: string
+  reason?: string
+  instruction?: string
+  watch_interval?: number
+  is_active?: boolean
+  last_execution_time?: string
+  next_execution_time?: string
+  [key: string]: unknown
+}
+
 export class OpenVikingClient {
   connected = false
 
@@ -244,5 +297,112 @@ export class OpenVikingClient {
       body: JSON.stringify(body),
     }, { timeoutMs: 30000, ...this.peer(actorPeerId) })
     return response.ok ? response.result : null
+  }
+
+  /** Recursively list a directory tree (agent output). */
+  async tree(uri: string, options: FsToolOptions = {}): Promise<TreeEntry[]> {
+    const query = [`uri=${encodeURIComponent(uri)}`, 'output=agent']
+    if (options.nodeLimit) query.push(`node_limit=${options.nodeLimit}`)
+    if (options.levelLimit) query.push(`level_limit=${options.levelLimit}`)
+    const response = await this.fetchJSON(
+      `/api/v1/fs/tree?${query.join('&')}`,
+      {},
+      this.peer(options.actorPeerId),
+    )
+    return response.ok && Array.isArray(response.result) ? (response.result as TreeEntry[]) : []
+  }
+
+  /** Write, append, or create text content at an OpenViking file URI. */
+  async writeContent(
+    uri: string,
+    content: string,
+    options: { mode?: 'replace' | 'append' | 'create'; wait?: boolean; timeoutMs?: number; actorPeerId?: string } = {},
+  ): Promise<ApiResponse<Record<string, unknown>>> {
+    const body: Record<string, unknown> = { uri, content, mode: options.mode ?? 'replace' }
+    if (options.wait !== undefined) body.wait = options.wait
+    if (options.timeoutMs !== undefined) body.timeout = options.timeoutMs / 1000
+    return this.fetchJSON(
+      '/api/v1/content/write',
+      { method: 'POST', body: JSON.stringify(body) },
+      { timeoutMs: options.timeoutMs ?? 30000, ...this.peer(options.actorPeerId) },
+    )
+  }
+
+  /** Replace an exact string in an existing file (read → replace → write). */
+  async editContent(
+    uri: string,
+    oldString: string,
+    newString: string,
+    options: { replaceAll?: boolean; wait?: boolean; timeoutMs?: number; actorPeerId?: string } = {},
+  ): Promise<{ ok: boolean; message: string }> {
+    if (!oldString) return { ok: false, message: 'old_string must not be empty' }
+    const current = await this.read(uri, 'full', options.actorPeerId)
+    if (current === null) return { ok: false, message: `No content at ${uri}` }
+    const occurrences = current.split(oldString).length - 1
+    if (occurrences === 0) {
+      return { ok: false, message: `old_string not found in ${uri}. Re-read the file to see its current content.` }
+    }
+    if (occurrences > 1 && !options.replaceAll) {
+      return { ok: false, message: `old_string matches ${occurrences} times; pass replace_all to replace every occurrence.` }
+    }
+    const updated = options.replaceAll
+      ? current.split(oldString).join(newString)
+      : current.replace(oldString, newString)
+    const response = await this.writeContent(uri, updated, {
+      mode: 'replace',
+      wait: options.wait,
+      timeoutMs: options.timeoutMs,
+      actorPeerId: options.actorPeerId,
+    })
+    return response.ok
+      ? { ok: true, message: `Edited ${uri}: replaced ${occurrences} occurrence${occurrences === 1 ? '' : 's'}.` }
+      : { ok: false, message: `Failed to edit ${uri}: ${response.error?.message || response.error?.code || 'unknown error'}` }
+  }
+
+  /** Content search with a regex pattern. */
+  async grep(pattern: string, options: FsToolOptions = {}): Promise<GrepResult> {
+    const body: Record<string, unknown> = { pattern, uri: options.uri ?? '' }
+    if (options.caseInsensitive !== undefined) body.case_insensitive = options.caseInsensitive
+    if (options.nodeLimit) body.node_limit = options.nodeLimit
+    if (options.levelLimit) body.level_limit = options.levelLimit
+    const response = await this.fetchJSON(
+      '/api/v1/search/grep',
+      { method: 'POST', body: JSON.stringify(body) },
+      this.peer(options.actorPeerId),
+    )
+    return response.ok && response.result && typeof response.result === 'object'
+      ? (response.result as unknown as GrepResult)
+      : { matches: [], count: 0, match_count: 0, files_scanned: 0 }
+  }
+
+  /** Find files matching a glob pattern. */
+  async glob(pattern: string, options: FsToolOptions = {}): Promise<GlobEntry[]> {
+    const body: Record<string, unknown> = { pattern }
+    if (options.uri) body.uri = options.uri
+    if (options.nodeLimit) body.node_limit = options.nodeLimit
+    const response = await this.fetchJSON(
+      '/api/v1/search/glob',
+      { method: 'POST', body: JSON.stringify(body) },
+      this.peer(options.actorPeerId),
+    )
+    const result = response.ok && response.result ? response.result as Record<string, unknown> : null
+    return result && Array.isArray(result.matches) ? result.matches as GlobEntry[] : []
+  }
+
+  /** List watch tasks (re-ingestion schedules). */
+  async listWatches(actorPeerId?: string): Promise<WatchTask[]> {
+    const response = await this.fetchJSON('/api/v1/watches', {}, this.peer(actorPeerId))
+    const result = response.ok && response.result ? response.result as Record<string, unknown> : null
+    return result && Array.isArray(result.tasks) ? result.tasks as WatchTask[] : []
+  }
+
+  /** Cancel the watch task targeting a URI. */
+  async cancelWatch(uri: string, actorPeerId?: string): Promise<boolean> {
+    const response = await this.fetchJSON(
+      `/api/v1/watches?to_uri=${encodeURIComponent(uri)}`,
+      { method: 'DELETE' },
+      this.peer(actorPeerId),
+    )
+    return response.ok
   }
 }

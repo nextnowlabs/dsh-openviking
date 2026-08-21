@@ -2,40 +2,33 @@ import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.ts'
 
 describe('resolveConfig', () => {
-  it('applies and normalizes behavior environment overrides', () => {
-    const config = resolveConfig({}, {
-      OPENVIKING_URL: 'http://127.0.0.1:19464/',
-      OPENVIKING_WORKSPACE_PEER: '0',
-      OPENVIKING_RECALL_PEER_SCOPE: 'actor',
-      OPENVIKING_RECALL_QUERY_EXPANSION: 'off',
-      OPENVIKING_RECALL_LIMIT: '7',
-    }, '/workspace/project')
+  it('ignores OPENVIKING_* env vars and config files entirely (settings-only)', () => {
+    // resolveConfig no longer takes an env argument: values come only from the
+    // settings document plus built-in defaults.
+    const config = resolveConfig({}, '/workspace/project')
 
-    expect(config.endpoint).toBe('http://127.0.0.1:19464')
-    expect(config.workspacePeer).toBe(false)
+    expect(config.endpoint).toBe('http://127.0.0.1:1933')
+    expect(config.apiKey).toBe('')
+    expect(config.account).toBe('')
+    expect(config.user).toBe('')
     expect(config.peerId).toBe('')
-    expect(config.recallPeerScope).toBe('actor')
-    expect(config.recallQueryExpansion).toBe('off')
-    expect(config.recallQueryExpansionConfigured).toBe(true)
-    expect(config.recallLimit).toBe(7)
-    expect(config.recallLimitConfigured).toBe(true)
+    expect(config.workspacePeer).toBe(true)
+    expect(config.recallPeerScope).toBe('all')
+    expect(config.recallQueryExpansion).toBe('auto')
+    expect(config.recallLimit).toBe(10)
+    expect(config.recallLimitConfigured).toBe(false)
+    expect(config.recallQueryExpansionConfigured).toBe(false)
   })
 
-  it('lets explicit plugin/settings config override credential files and env', () => {
+  it('uses only the settings document values', () => {
     const config = resolveConfig({
-      endpoint: 'http://plugin.local',
+      endpoint: 'http://plugin.local/',
       apiKey: 'plugin-key',
       account: 'plugin-account',
       user: 'plugin-user',
       peerId: 'plugin-peer',
-      recallQueryExpansion: 'auto',
+      recallQueryExpansion: 'off',
       recallLimit: 5,
-    }, {
-      OPENVIKING_URL: 'http://env.local',
-      OPENVIKING_API_KEY: 'env-key',
-      OPENVIKING_ACCOUNT: 'env-account',
-      OPENVIKING_USER: 'env-user',
-      OPENVIKING_PEER_ID: 'env-peer',
     }, '/workspace/project')
 
     expect(config.endpoint).toBe('http://plugin.local')
@@ -43,10 +36,14 @@ describe('resolveConfig', () => {
     expect(config.account).toBe('plugin-account')
     expect(config.user).toBe('plugin-user')
     expect(config.peerId).toBe('plugin-peer')
+    expect(config.recallQueryExpansion).toBe('off')
+    expect(config.recallQueryExpansionConfigured).toBe(true)
+    expect(config.recallLimit).toBe(5)
+    expect(config.recallLimitConfigured).toBe(true)
   })
 
   it('resolves a workspace-derived peer when no explicit peer is set', () => {
-    const config = resolveConfig({}, {}, '/workspace/My Project')
+    const config = resolveConfig({}, '/workspace/My Project')
     expect(config.resolvedPeerId).toBe('-workspace-My-Project')
   })
 })

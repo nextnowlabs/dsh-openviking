@@ -1,6 +1,7 @@
 /**
  * Model-invocable OpenViking tools: search, read, browse, remember, forget,
- * ingest resources, and expand session archives.
+ * ingest resources, expand session archives, tree, write, edit, grep, glob,
+ * and watch management.
  * @module openviking-memory/tools
  */
 
@@ -201,6 +202,162 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
       return body ? `${header}\n\n${body}` : header
     },
   }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_tree',
+    description:
+      'List the recursive directory tree under an OpenViking URI, optionally limited by depth.',
+    parameters: {
+      uri: { type: 'string', description: 'URI to tree. Defaults to the OpenViking root.' },
+      level_limit: { type: 'integer', description: 'Maximum depth to traverse, from 1 to 10.' },
+      node_limit: { type: 'integer', description: 'Maximum number of nodes to return.' },
+    },
+    async execute(args, exec) {
+      const actorPeerId = await peerFor(runtime, exec)
+      const uri = args.uri || 'viking://'
+      const entries = await client.tree(uri, {
+        nodeLimit: args.node_limit,
+        levelLimit: args.level_limit,
+        actorPeerId,
+      })
+      if (entries.length === 0) return `Empty tree: ${uri}`
+      return entries.map(entry => {
+        const prefix = entry.isDir ? '[dir]' : '[file]'
+        const abstract = entry.abstract && entry.abstract.length > 120
+          ? ` — ${entry.abstract.slice(0, 120)}...`
+          : ''
+        return `${prefix} ${entry.rel_path || entry.uri}${abstract}`
+      }).join('\n')
+    },
+  }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_write',
+    description:
+      'Write text to an OpenViking file URI (replace, append, or create). Use this to persist notes, decisions, profiles, or state.',
+    parameters: {
+      uri: { type: 'string', required: true, description: 'The OpenViking file URI to write.' },
+      content: { type: 'string', required: true, description: 'Text content to write.' },
+      mode: {
+        type: 'string',
+        enum: ['replace', 'append', 'create'],
+        description: 'Write mode: replace (default), append, or create (fails if it already exists).',
+      },
+    },
+    async execute(args, exec) {
+      const response = await client.writeContent(
+        args.uri,
+        args.content,
+        { mode: args.mode ?? 'replace', actorPeerId: await peerFor(runtime, exec) },
+      )
+      if (!response.ok) {
+        return `Failed to write ${args.uri}: ${response.error?.message || response.error?.code || 'unknown error'}`
+      }
+      const result = (response.result ?? {}) as Record<string, unknown>
+      const bytes = result.written_bytes
+      return `Wrote ${bytes === undefined ? 'content' : `${bytes} bytes`} to ${result.uri || args.uri} (mode=${result.mode || args.mode || 'replace'})`
+    },
+  }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_edit',
+    description:
+      'Replace an exact string with new text in an existing OpenViking file. old_string must match the current content exactly; use viking_read first.',
+    parameters: {
+      uri: { type: 'string', required: true, description: 'The OpenViking file URI to edit.' },
+      old_string: { type: 'string', required: true, description: 'Exact text to replace.' },
+      new_string: { type: 'string', required: true, description: 'Replacement text; empty string deletes old_string.' },
+      replace_all: { type: 'boolean', description: 'Replace every occurrence (default false).' },
+    },
+    async execute(args, exec) {
+      const result = await client.editContent(
+        args.uri,
+        args.old_string,
+        args.new_string,
+        { replaceAll: args.replace_all, actorPeerId: await peerFor(runtime, exec) },
+      )
+      return result.message
+    },
+  }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_grep',
+    description:
+      'Search file contents under an OpenViking URI with a regex pattern. Use for exact text matching; viking_search is for semantic retrieval.',
+    parameters: {
+      pattern: { type: 'string', required: true, description: 'Regular expression to search for.' },
+      uri: { type: 'string', description: 'URI prefix to search. Defaults to the OpenViking root.' },
+      case_insensitive: { type: 'boolean', description: 'Case-insensitive matching (default false).' },
+      node_limit: { type: 'integer', description: 'Maximum matches to return.' },
+    },
+    async execute(args, exec) {
+      const result = await client.grep(args.pattern, {
+        uri: args.uri || 'viking://',
+        caseInsensitive: args.case_insensitive,
+        nodeLimit: args.node_limit,
+        actorPeerId: await peerFor(runtime, exec),
+      })
+      const matches = result.matches ?? []
+      if (matches.length === 0) {
+        return `No matches found for ${JSON.stringify(args.pattern)} under ${args.uri || 'viking://'}.`
+      }
+      const header = `Found ${result.match_count ?? matches.length} match(es) in ${result.files_scanned ?? '?'} file(s):`
+      const lines = matches.map(m => {
+        const where = m.uri ? `${m.uri}${m.line ? `:${m.line}` : ''}` : '?'
+        return `${where}\n  ${m.content ?? ''}`
+      })
+      return `${header}\n\n${lines.join('\n\n')}`
+    },
+  }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_glob',
+    description:
+      'Find OpenViking files matching a glob pattern (e.g. **/*.md). Use for filename matching; viking_search is for content-based retrieval.',
+    parameters: {
+      pattern: { type: 'string', required: true, description: 'Glob pattern such as **/*.md.' },
+      uri: { type: 'string', description: 'Root URI to search. Defaults to the OpenViking root.' },
+      node_limit: { type: 'integer', description: 'Maximum matches to return.' },
+    },
+    async execute(args, exec) {
+      const matches = await client.glob(args.pattern, {
+        uri: args.uri,
+        nodeLimit: args.node_limit,
+        actorPeerId: await peerFor(runtime, exec),
+      })
+      if (matches.length === 0) return `No files found matching: ${args.pattern}`
+      return `Found ${matches.length} file(s):\n${matches.map(m => `  ${m.uri ?? String(m)}`).join('\n')}`
+    },
+  }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_list_watches',
+    description: 'List the OpenViking watch tasks that re-ingest external resources on a schedule.',
+    parameters: {},
+    async execute(_args, exec) {
+      const tasks = await client.listWatches(await peerFor(runtime, exec))
+      if (tasks.length === 0) return 'No watch tasks.'
+      return tasks.map(task => {
+        const state = task.is_active ? 'active' : 'paused'
+        const target = task.to_uri || task.path || '?'
+        return `- ${task.task_id} [${state}] ${target} (interval ${task.watch_interval ?? '?'}m)`
+      }).join('\n')
+    },
+  }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_cancel_watch',
+    description: 'Cancel the OpenViking watch task targeting a URI, stopping further re-ingestion.',
+    parameters: {
+      uri: { type: 'string', required: true, description: 'The target URI of the watch task to cancel.' },
+    },
+    async execute(args, exec) {
+      const ok = await client.cancelWatch(args.uri, await peerFor(runtime, exec))
+      return ok
+        ? `Cancelled watch on ${args.uri}`
+        : `Failed to cancel watch on ${args.uri}`
+    },
+  }))
 }
 
 /** Presentation identity per tool: pending-card kind and title verb. */
@@ -212,6 +369,13 @@ const TOOL_PRESENTATION: Record<string, { kind: 'read' | 'other'; title: (args: 
   viking_forget: { kind: 'other', title: args => `OpenViking forget: ${args.uri ?? args.query ?? ''}` },
   viking_add_resource: { kind: 'other', title: args => `OpenViking ingest: ${args.url}` },
   viking_archive_expand: { kind: 'read', title: () => 'OpenViking archive expand' },
+  viking_tree: { kind: 'read', title: args => `OpenViking tree: ${args.uri ?? 'root'}` },
+  viking_write: { kind: 'other', title: args => `OpenViking write: ${args.uri}` },
+  viking_edit: { kind: 'other', title: args => `OpenViking edit: ${args.uri}` },
+  viking_grep: { kind: 'read', title: args => `OpenViking grep: ${args.pattern}` },
+  viking_glob: { kind: 'read', title: args => `OpenViking glob: ${args.pattern}` },
+  viking_list_watches: { kind: 'read', title: () => 'OpenViking list watches' },
+  viking_cancel_watch: { kind: 'other', title: args => `OpenViking cancel watch: ${args.uri}` },
 }
 
 /**

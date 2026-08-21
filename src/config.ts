@@ -2,19 +2,18 @@
  * Plugin configuration surfaced through the DSH Settings surface.
  *
  * The `openviking` settings namespace carries connection identity, recall and
- * capture tuning, and commit behavior. Values are layered: the Settings
- * document wins, then `OPENVIKING_*` environment variables, then
- * `~/.openviking/ovcli.conf`, then `~/.openviking/ov.conf`. Secrets never
+ * capture tuning, and commit behavior. Configuration comes ONLY from the
+ * settings document (plus built-in defaults): `OPENVIKING_*` environment
+ * variables and `~/.openviking` config files are never consulted. Secrets never
  * live in source — the API key is stored in the settings document (redacted on
- * every wire surface) and resolved from the environment/config files as a
- * fallback.
+ * every wire surface).
  * @module openviking-memory/config
  */
 
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import { settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { buildUserAgent, resolveOpenVikingCredentials } from './shared/credentials.ts'
+import { buildUserAgent } from './shared/credentials.ts'
 import { resolveEffectivePeerId } from './shared/workspace-peer.ts'
 import { PLUGIN_VERSION } from './version.ts'
 
@@ -28,7 +27,7 @@ export const DEFAULT_OPENVIKING_ENDPOINT = 'http://127.0.0.1:1933'
 export interface OpenVikingSettings {
   /** OpenViking server base URL. */
   endpoint: string
-  /** Bearer credential (settings document or env/config fallback). */
+  /** Bearer credential (stored in the settings document). */
   apiKey: string
   /** Trusted-mode account. */
   account: string
@@ -84,9 +83,9 @@ export type OpenVikingConfig = OpenVikingSettings & {
   explicitPeerId: string
   /** User-Agent sent on OpenViking-bound requests. */
   userAgent: string
-  /** Whether recallQueryExpansion was explicitly configured (settings/env). */
+  /** Whether recallQueryExpansion was explicitly configured in settings. */
   recallQueryExpansionConfigured: boolean
-  /** Whether recallLimit was explicitly configured (settings/env). */
+  /** Whether recallLimit was explicitly configured in settings. */
   recallLimitConfigured: boolean
 }
 
@@ -118,12 +117,6 @@ export const Config: Schema<OpenVikingSettings> = z.object({
   requestTimeoutMs: z.number().default(10000),
 })
 
-/** Behavior environment overrides applied after the settings document. */
-const RECALL_LIMIT_ENV = 'OPENVIKING_RECALL_LIMIT'
-const RECALL_PEER_SCOPE_ENV = 'OPENVIKING_RECALL_PEER_SCOPE'
-const RECALL_QUERY_EXPANSION_ENV = 'OPENVIKING_RECALL_QUERY_EXPANSION'
-const WORKSPACE_PEER_ENV = 'OPENVIKING_WORKSPACE_PEER'
-
 function clampInteger(value: number | undefined, minimum: number, maximum: number, fallback: number): number {
   const number = Math.round(Number(value))
   if (!Number.isFinite(number)) return fallback
@@ -136,50 +129,28 @@ function clampNumber(value: number | undefined, minimum: number, maximum: number
   return Math.max(minimum, Math.min(maximum, number))
 }
 
-function environmentBoolean(value: string | undefined, fallback: boolean): boolean {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (['0', 'false', 'no', 'off'].includes(normalized)) return false
-  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true
-  return fallback
-}
-
 /**
  * Validate and normalize a resolved settings section (schema defaults already
- * materialized) plus environment/config-file fallbacks.
+ * materialized). Configuration comes only from the settings document — no
+ * environment variables or `~/.openviking` config files are consulted.
  * @param input - the schema-resolved settings section (or a partial override).
- * @param env - environment (injectable for tests).
  * @param cwd - workspace (injectable for tests).
  */
 export function resolveConfig(
   input: Partial<OpenVikingSettings> = {},
-  env: Record<string, string | undefined> = process.env,
   cwd: string = process.cwd(),
 ): OpenVikingConfig {
-  const credentials = resolveOpenVikingCredentials(env)
-  const explicitPeerId = String(input.peerId || credentials.peerId || '').trim()
+  const explicitPeerId = String(input.peerId || '').trim()
   const config: OpenVikingConfig = {
     ...defaults(),
     ...input,
-    endpoint: String(input.endpoint || credentials.baseUrl || DEFAULT_OPENVIKING_ENDPOINT),
-    apiKey: String(input.apiKey || credentials.apiKey || ''),
-    account: String(input.account || credentials.account || ''),
-    user: String(input.user || credentials.user || ''),
+    endpoint: String(input.endpoint || DEFAULT_OPENVIKING_ENDPOINT),
+    apiKey: String(input.apiKey || ''),
+    account: String(input.account || ''),
+    user: String(input.user || ''),
     peerId: explicitPeerId,
     explicitPeerId,
     userAgent: buildUserAgent('dsh', PLUGIN_VERSION),
-  }
-
-  if (env[WORKSPACE_PEER_ENV] !== undefined) {
-    config.workspacePeer = environmentBoolean(env[WORKSPACE_PEER_ENV], config.workspacePeer)
-  }
-  if (env[RECALL_PEER_SCOPE_ENV]) {
-    config.recallPeerScope = env[RECALL_PEER_SCOPE_ENV] === 'actor' ? 'actor' : 'all'
-  }
-  if (env[RECALL_QUERY_EXPANSION_ENV]) {
-    config.recallQueryExpansion = env[RECALL_QUERY_EXPANSION_ENV] === 'off' ? 'off' : 'auto'
-  }
-  if (env[RECALL_LIMIT_ENV]) {
-    config.recallLimit = clampInteger(Number(env[RECALL_LIMIT_ENV]), 1, 50, config.recallLimit)
   }
 
   config.endpoint = String(config.endpoint || DEFAULT_OPENVIKING_ENDPOINT).replace(/\/+$/, '')
@@ -203,9 +174,7 @@ export function resolveConfig(
   config.captureAssistantTurns = config.captureAssistantTurns !== false
   config.captureToolResults = config.captureToolResults === true
   config.recallQueryExpansionConfigured = Object.prototype.hasOwnProperty.call(input, 'recallQueryExpansion')
-    || Boolean(env[RECALL_QUERY_EXPANSION_ENV])
   config.recallLimitConfigured = Object.prototype.hasOwnProperty.call(input, 'recallLimit')
-    || Boolean(env[RECALL_LIMIT_ENV])
   return config
 }
 

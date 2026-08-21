@@ -336,7 +336,7 @@ type SettingsSectionProps = PropsRuntime<'settings.section'> & {
 }
 
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { en, zh }), '@openviking/dsh-memory-plugin: locale')
+  ctx.effect(() => ctx.locale.register(NS, { en, zh }), '@nextnowlabs/dsh-openviking: locale')
   ctx.slots.inject('settings.section', () => {
     const scope = ctx.settingsScope.bind<SettingsValue>({ namespace: NS })
     const t = ctx.locale.bind(NS)

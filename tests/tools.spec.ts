@@ -99,3 +99,57 @@ describe('archive expansion', () => {
     expect(rendered).toMatch(/Output: done/)
   })
 })
+
+describe('content and watch tools', () => {
+  it('viking_write renders the server result', async () => {
+    const registered: Array<{ name: string, execute: (args: Record<string, unknown>, exec: unknown) => Promise<string> }> = []
+    registerOpenVikingTools(
+      { tools: { register: definition => registered.push(definition as never) } },
+      {
+        async writeContent(uri: string, content: string, options: Record<string, unknown>) {
+          return { ok: true, result: { uri, written_bytes: content.length, mode: options.mode } }
+        },
+      } as never,
+      {
+        async initialize() {
+          return { ovSessionId: 'dsh-session', config: { resolvedPeerId: 'workspace-peer' } }
+        },
+      } as never,
+    )
+    const write = registered.find(tool => tool.name === 'viking_write')!
+
+    const rendered = await write.execute({ uri: 'viking://notes.md', content: 'hello' }, { agent: {} })
+
+    expect(rendered).toBe('Wrote 5 bytes to viking://notes.md (mode=replace)')
+  })
+
+  it('viking_grep renders matches and resolves the per-session peer', async () => {
+    const registered: Array<{ name: string, execute: (args: Record<string, unknown>, exec: unknown) => Promise<string> }> = []
+    let peer: string | undefined
+    registerOpenVikingTools(
+      { tools: { register: definition => registered.push(definition as never) } },
+      {
+        async grep(_pattern: string, options: Record<string, unknown>) {
+          peer = options.actorPeerId as string | undefined
+          return {
+            matches: [{ uri: 'viking://notes.md', line: 1, content: 'line one' }],
+            match_count: 1,
+            files_scanned: 1,
+          }
+        },
+      } as never,
+      {
+        async initialize() {
+          return { ovSessionId: 'dsh-session', config: { resolvedPeerId: 'workspace-peer' } }
+        },
+      } as never,
+    )
+    const grep = registered.find(tool => tool.name === 'viking_grep')!
+
+    const rendered = await grep.execute({ pattern: 'line' }, { agent: {} })
+
+    expect(peer).toBe('workspace-peer')
+    expect(rendered).toContain('viking://notes.md:1')
+    expect(rendered).toContain('line one')
+  })
+})

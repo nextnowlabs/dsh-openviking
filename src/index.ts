@@ -1,5 +1,5 @@
 /**
- * @openviking/dsh-memory-plugin — OpenViking memory and context bundle for
+ * @nextnowlabs/dsh-openviking — OpenViking memory and context bundle for
  * DeepSeek Harness.
  *
  * The plugin registers the `openviking` settings namespace (endpoint,
@@ -14,7 +14,7 @@
  * Recall and profile context enter as `source: { kind: 'plugin' }` user
  * messages, deliberately not the system prompt: a `complete: true` persona
  * (the stock `minimal` preset) would silently discard prompt additions.
- * @module @openviking/dsh-memory-plugin
+ * @module @nextnowlabs/dsh-openviking
  */
 
 import type { Context } from '@deepseek-ai/cordis'
