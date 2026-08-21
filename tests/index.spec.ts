@@ -1,5 +1,20 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 import { apply } from '../src/index.ts'
+
+const originalStateDir = process.env.OPENVIKING_STATE_DIR
+const originalPendingDir = process.env.OPENVIKING_PENDING_DIR
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  if (originalStateDir === undefined) delete process.env.OPENVIKING_STATE_DIR
+  else process.env.OPENVIKING_STATE_DIR = originalStateDir
+  if (originalPendingDir === undefined) delete process.env.OPENVIKING_PENDING_DIR
+  else process.env.OPENVIKING_PENDING_DIR = originalPendingDir
+  await Promise.all(tempDirs.splice(0).map(dir => rm(dir, { recursive: true, force: true })))
+})
 
 function makeCtx() {
   const handlers = new Map<string, (...args: never[]) => unknown>()
@@ -42,6 +57,16 @@ function response(result: unknown, status = 200) {
 
 describe('plugin apply', () => {
   it('recalls from the final downstream message batch on pre-step', async () => {
+    // The plugin writes recall/context-face cache state under the user home
+    // by default; a real DSH run on this machine would otherwise leak
+    // `context-face.json` / `recall-legacy.json` into the test and skip the
+    // probes this assertion depends on.
+    const stateDir = await mkdtemp(join(tmpdir(), 'dsh-index-state-'))
+    const pendingDir = await mkdtemp(join(tmpdir(), 'dsh-index-pending-'))
+    tempDirs.push(stateDir, pendingDir)
+    process.env.OPENVIKING_STATE_DIR = stateDir
+    process.env.OPENVIKING_PENDING_DIR = pendingDir
+
     const { ctx, handlers } = makeCtx()
     apply(ctx, {})
 

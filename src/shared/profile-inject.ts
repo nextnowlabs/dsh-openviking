@@ -19,17 +19,20 @@ let _userSpaceCache: string | null = null
 async function resolveUserSpace(fetchJSON: FetchJSON, actorPeerId = ''): Promise<string> {
   if (_userSpaceCache) return _userSpaceCache
 
+  // Independent probes; parallel so slow servers don't double the cost.
+  const [status, lsRes] = await Promise.all([
+    fetchJSON('/api/v1/system/status'),
+    fetchJSON(
+      `/api/v1/fs/ls?uri=${encodeURIComponent('viking://user')}&output=original`,
+      {},
+      { actorPeerId },
+    ),
+  ])
+
   let fallbackSpace = 'default'
-  const status = await fetchJSON('/api/v1/system/status')
   if (status.ok && typeof status.result?.user === 'string' && (status.result.user as string).trim()) {
     fallbackSpace = (status.result.user as string).trim()
   }
-
-  const lsRes = await fetchJSON(
-    `/api/v1/fs/ls?uri=${encodeURIComponent('viking://user')}&output=original`,
-    {},
-    { actorPeerId },
-  )
   if (lsRes.ok && Array.isArray(lsRes.result)) {
     const spaces = (lsRes.result as Array<{ isDir?: boolean; name?: string }>)
       .filter((e) => e?.isDir)

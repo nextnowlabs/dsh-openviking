@@ -33,6 +33,7 @@ const CODING_QUOTA_WEIGHTS: Record<string, number> = {
 }
 
 let userSpaceCache = ''
+let userSpacePromise: Promise<string> | null = null
 
 export function estimateTokens(text: string | undefined): number {
   return text ? Math.ceil(String(text).length / 4) : 0
@@ -275,31 +276,41 @@ function dedupeItems(items: RecallItem[]): RecallItem[] {
 
 async function resolveUserSpace(fetchJSON: FetchJSON, actorPeerId = ''): Promise<string> {
   if (userSpaceCache) return userSpaceCache
+  // Concurrent callers (the two search sources run in parallel) share one
+  // in-flight resolution instead of racing the cache and doubling the probes.
+  if (!userSpacePromise) {
+    userSpacePromise = (async () => {
+      // Both probes are independent; on slow servers (2-5s per request)
+      // running them serially doubled the first-turn cost for no reason.
+      const [status, lsRes] = await Promise.all([
+        fetchJSON('/api/v1/system/status'),
+        fetchJSON(
+          `/api/v1/fs/ls?uri=${encodeURIComponent('viking://user')}&output=original`,
+          {},
+          { actorPeerId },
+        ),
+      ])
 
-  let fallbackSpace = 'default'
-  const status = await fetchJSON('/api/v1/system/status')
-  if (status.ok && typeof status.result?.user === 'string' && (status.result.user as string).trim()) {
-    fallbackSpace = (status.result.user as string).trim()
+      let fallbackSpace = 'default'
+      if (status.ok && typeof status.result?.user === 'string' && (status.result.user as string).trim()) {
+        fallbackSpace = (status.result.user as string).trim()
+      }
+      if (lsRes.ok && Array.isArray(lsRes.result)) {
+        const spaces = (lsRes.result as Array<{ isDir?: boolean; name?: string }>)
+          .filter((e) => e?.isDir)
+          .map((e) => (typeof e.name === 'string' ? e.name.trim() : ''))
+          .filter((n) => n && !n.startsWith('.') && !USER_RESERVED_DIRS.has(n))
+        if (spaces.length > 0) {
+          if (spaces.includes(fallbackSpace)) { userSpaceCache = fallbackSpace; return fallbackSpace }
+          if (spaces.includes('default')) { userSpaceCache = 'default'; return 'default' }
+          if (spaces.length === 1) { userSpaceCache = spaces[0] as string; return spaces[0] as string }
+        }
+      }
+      userSpaceCache = fallbackSpace
+      return fallbackSpace
+    })()
   }
-
-  const lsRes = await fetchJSON(
-    `/api/v1/fs/ls?uri=${encodeURIComponent('viking://user')}&output=original`,
-    {},
-    { actorPeerId },
-  )
-  if (lsRes.ok && Array.isArray(lsRes.result)) {
-    const spaces = (lsRes.result as Array<{ isDir?: boolean; name?: string }>)
-      .filter((e) => e?.isDir)
-      .map((e) => (typeof e.name === 'string' ? e.name.trim() : ''))
-      .filter((n) => n && !n.startsWith('.') && !USER_RESERVED_DIRS.has(n))
-    if (spaces.length > 0) {
-      if (spaces.includes(fallbackSpace)) { userSpaceCache = fallbackSpace; return fallbackSpace }
-      if (spaces.includes('default')) { userSpaceCache = 'default'; return 'default' }
-      if (spaces.length === 1) { userSpaceCache = spaces[0] as string; return spaces[0] as string }
-    }
-  }
-  userSpaceCache = fallbackSpace
-  return fallbackSpace
+  return userSpacePromise
 }
 
 async function resolveTargetUri(fetchJSON: FetchJSON, targetUri: string, actorPeerId = ''): Promise<string> {
@@ -465,6 +476,22 @@ export async function isContextFaceLegacy(path = stateFile('context-face.json'),
 }
 
 export async function markContextFaceLegacy(path = stateFile('context-face.json'), now = Date.now()): Promise<void> {
+  await writeJsonFile(path, { legacyUntil: now + LEGACY_CACHE_TTL_MS })
+}
+
+/**
+ * Remember across turns that this deployment has no deprecated /recall
+ * endpoint. On slow servers every probe costs a full request round-trip
+ * (2-5s observed), and probing on every model step made every turn crawl.
+ * Only definitive "endpoint missing" statuses (404/405/501) are cached;
+ * transient failures keep retrying.
+ */
+export async function isRecallEndpointMissing(path = stateFile('recall-legacy.json'), now = Date.now()): Promise<boolean> {
+  const cached = await readJsonFile(path)
+  return Boolean(cached?.legacyUntil && Number(cached.legacyUntil) > now)
+}
+
+export async function markRecallEndpointMissing(path = stateFile('recall-legacy.json'), now = Date.now()): Promise<void> {
   await writeJsonFile(path, { legacyUntil: now + LEGACY_CACHE_TTL_MS })
 }
 
@@ -638,11 +665,15 @@ async function recallViaEndpoint(
   actorPeerId = '',
   log: (stage: string, data: unknown) => void = () => {},
 ): Promise<string | null> {
+  if (await isRecallEndpointMissing()) return null
   const body = buildRecallEndpointBody(cfg)
   body.query = query
   const res = await postRecall(fetchJSON, body, { actorPeerId, log })
   if (!res.ok) {
     log('recall_endpoint_fallback', { status: res.status || 0 })
+    if (res.status === 404 || res.status === 405 || res.status === 501) {
+      await markRecallEndpointMissing()
+    }
     return null
   }
   const rendered = String((res.result as Record<string, unknown> | undefined)?.rendered || '').trim()
