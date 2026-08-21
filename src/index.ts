@@ -112,15 +112,25 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
   // prepend: downstream waterfall listeners run first, so this plugin sees
   // the final claimed batch and appends after every other contributor.
   ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    // Profile construction (shared session init + profile reads) is independent
+    // of the final message batch, so start it before the downstream waterfall
+    // and let its HTTP round-trips overlap the system-prompt assembly instead
+    // of paying for them serially after `next()`.
+    const profile = runtime.profileMessage(agent).catch(() => null)
     const decision = await next()
     if (decision.kind !== 'enter' || signal.aborted) return decision
-    const profile = await runtime.profileMessage(agent)
-    if (signal.aborted) return decision
-    const recall = await runtime.recallMessage(agent, decision.messages)
+    // Profile + recall run concurrently under a hard deadline so a slow or
+    // remote OpenViking server can never hold a model step (see
+    // `preStepContext`). recallTimeoutMs bounds the whole augmentation.
+    const { profile: profileBlock, recall: recallBlock } = await runtime.preStepContext(
+      agent,
+      decision.messages,
+      { profile, deadlineMs: config.recallTimeoutMs },
+    )
     if (signal.aborted) return decision
     const additions = []
-    if (profile) additions.push(profile)
-    if (recall) additions.push(recall)
+    if (profileBlock) additions.push(profileBlock)
+    if (recallBlock) additions.push(recallBlock)
     return additions.length > 0
       ? { kind: 'enter', messages: [...decision.messages, ...additions] }
       : decision

@@ -259,4 +259,93 @@ describe('OpenVikingRuntime', () => {
     expect(committed.sort()).toEqual(['dsh-one', 'dsh-two'])
     expect(runtime.states.size).toBe(0)
   })
+
+  it('preStepContext returns profile and recall when both finish under the deadline', async () => {
+    const runtime = new OpenVikingRuntime({} as never, config(), { debug() {} } as never)
+    const typed = runtime as unknown as {
+      profileMessage(agent: unknown): Promise<unknown>
+      recallMessage(agent: unknown, messages: ReadonlyArray<unknown>): Promise<unknown>
+    }
+    typed.profileMessage = async () => ({ kind: 'profile' })
+    typed.recallMessage = async () => ({ kind: 'recall' })
+
+    const result = await runtime.preStepContext(
+      { session: { id: 'under', header: { cwd: '/workspace' } } },
+      [{}],
+      { deadlineMs: 1000 },
+    )
+
+    expect(result.profile).toEqual({ kind: 'profile' })
+    expect(result.recall).toEqual({ kind: 'recall' })
+  })
+
+  it('preStepContext drops a side that misses the deadline without stalling the step', async () => {
+    const runtime = new OpenVikingRuntime({} as never, config(), { debug() {} } as never)
+    const typed = runtime as unknown as {
+      profileMessage(agent: unknown): Promise<unknown>
+      recallMessage(agent: unknown, messages: ReadonlyArray<unknown>): Promise<unknown>
+    }
+    typed.profileMessage = async () => ({ kind: 'profile' })
+    typed.recallMessage = async () => {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      return { kind: 'recall' }
+    }
+
+    const started = Date.now()
+    const result = await runtime.preStepContext(
+      { session: { id: 'slow', header: { cwd: '/workspace' } } },
+      [{}],
+      { deadlineMs: 30 },
+    )
+
+    expect(Date.now() - started).toBeLessThan(80)
+    expect(result.profile).toEqual({ kind: 'profile' })
+    expect(result.recall).toBeNull()
+  })
+
+  it('preStepContext honours a caller-provided in-flight profile promise', async () => {
+    const runtime = new OpenVikingRuntime({} as never, config(), { debug() {} } as never)
+    const typed = runtime as unknown as {
+      recallMessage(agent: unknown, messages: ReadonlyArray<unknown>): Promise<unknown>
+    }
+    typed.recallMessage = async () => ({ kind: 'recall' })
+
+    const result = await runtime.preStepContext(
+      { session: { id: 'provided', header: { cwd: '/workspace' } } },
+      [{}],
+      { profile: Promise.resolve({ kind: 'profile' }), deadlineMs: 1000 },
+    )
+
+    expect(result.profile).toEqual({ kind: 'profile' })
+    expect(result.recall).toEqual({ kind: 'recall' })
+  })
+
+  it('skips profile fetch and never delivers a profile when injectProfile is off', async () => {
+    const pendingDir = await mkdtemp(join(tmpdir(), 'dsh-memory-noprofile-'))
+    tempDirs.push(pendingDir)
+    process.env.OPENVIKING_PENDING_DIR = pendingDir
+    const fetched: string[] = []
+    const runtime = new OpenVikingRuntime({
+      async healthResult() {
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+      async ensureSessionResult() {
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+      async fetchJSON(path) {
+        fetched.push(String(path))
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+    } as never, resolveConfig({ injectProfile: false, workspacePeer: false }), { debug() {} } as never)
+    const session = { id: 'no-profile', header: { cwd: '/workspace' } }
+
+    await runtime.initialize({ session })
+    const state = runtime.stateFor(session)
+    expect(state.ready).toBe(true)
+    expect(state.profileBlock).toBe('')
+    expect(await runtime.profileMessage({ session })).toBeNull()
+    // The profile pipeline would hit /system/status, /fs/ls and /content/read;
+    // with injection disabled none of those round-trips happen.
+    expect(fetched).toEqual([])
+  })
 })

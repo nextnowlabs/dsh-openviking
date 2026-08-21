@@ -18,6 +18,8 @@ describe('resolveConfig', () => {
     expect(config.recallLimit).toBe(10)
     expect(config.recallLimitConfigured).toBe(false)
     expect(config.recallQueryExpansionConfigured).toBe(false)
+    expect(config.recallTimeoutMs).toBe(6000)
+    expect(config.injectProfile).toBe(true)
   })
 
   it('uses only the settings document values', () => {
@@ -45,5 +47,11 @@ describe('resolveConfig', () => {
   it('resolves a workspace-derived peer when no explicit peer is set', () => {
     const config = resolveConfig({}, '/workspace/My Project')
     expect(config.resolvedPeerId).toBe('-workspace-My-Project')
+  })
+
+  it('clamps recallTimeoutMs into the supported range', () => {
+    expect(resolveConfig({ recallTimeoutMs: 100 }).recallTimeoutMs).toBe(1000)
+    expect(resolveConfig({ recallTimeoutMs: 99999 }).recallTimeoutMs).toBe(30000)
+    expect(resolveConfig({ recallTimeoutMs: 2500 }).recallTimeoutMs).toBe(2500)
   })
 })

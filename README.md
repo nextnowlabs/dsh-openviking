@@ -67,12 +67,14 @@ OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设
 | 最大召回条数 `recallLimit` | ✓ | `10` | Pre-step 召回上限 |
 | 召回令牌预算 `recallTokenBudget` | ✓ | `2000` | 每个召回块的令牌预算 |
 | 分数阈值 `scoreThreshold` | ✓ | `0.35` | 最低召回分数 |
+| 召回硬截止 `recallTimeoutMs` | ✓ | `6000` | 单次 pre-step 召回的硬性截止毫秒数；超时则跳过该步召回（画像与召回并行执行），避免慢/远端服务器拖住模型步 |
 | 提交令牌阈值 `commitTokenThreshold` | ✓ | `20000` | 触发提交的待处理令牌数阈值 |
 | 服务端查询扩展 `recallQueryExpansion` | | `auto` | `auto` 启用服务端查询扩展；`off` 关闭 |
 | 召回内容最大字符 `recallMaxContentChars` | | `500` | 每条召回项最多展示的字符数 |
 | 召回优先摘要 `recallPreferAbstract` | | 开 | 回退召回优先使用摘要而非全文 |
 | 最小查询长度 `minQueryLength` | | `3` | 低于该长度不触发召回 |
 | 画像令牌预算 `profileTokenBudget` | | `10000` | 会话开始时画像注入的令牌预算 |
+| 注入画像 `injectProfile` | ✓ | 开 | 是否在每个会话注入 `user-profile` + `<available-memories>` 画像块；关闭后不注入，初始化也不再拉取画像（动态召回不受影响） |
 | 技能注入 `injectSkills` | ✓ | 开 | 将 OpenViking 中保存的技能注入 DSH 技能目录 |
 
 ### 捕获
@@ -111,8 +113,9 @@ OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设
 
 ## 行为说明
 
-- `agent/session-start` 通过 `agent.inject()` 注入 OpenViking 画像与可用记忆索引。
-- `agent/pre-step` 使用当前步骤的输入进行检索，并将一条持久化、带来源标注的用户消息追加到同一步骤。召回与画像上下文以会话事件进入，可重放、对压缩可见且不会进入请求头。
+- `agent/session-start` 通过 `agent.inject()` 注入 OpenViking 画像与可用记忆索引（`injectProfile` 关闭时不注入，且初始化不再拉取画像）。
+- `agent/pre-step` 使用当前步骤的输入进行检索，并将一条持久化、带来源标注的用户消息追加到同一步骤。画像与召回上下文以会话事件进入，可重放、对压缩可见且不会进入请求头。
+- 画像与召回在 `agent/pre-step` 中**并行构建**，并受 `recallTimeoutMs` 硬性截止时间约束：慢/远端服务器超时后该步直接跳过召回（或画像），绝不阻塞模型步；画像构建在基础链路之前启动，与系统提示词装配重叠。
 - `session/event` 捕获用户、助手以及（可选）工具结果消息，无需抓取对话记录。
 - `turn/end` 检查待处理令牌阈值，并在需要时提交。
 - 写入失败的内容进入共享的待处理队列，在下次会话开始时重放。

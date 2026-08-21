@@ -158,24 +158,32 @@ export class OpenVikingRuntime {
       (stage, data) => this.log(stage, data),
     )
     await this.refreshPendingState(state)
-    const profile = await buildProfileBlock(
-      (path, init, options) => this.client.fetchJSON(path, init, options),
-      state.config.profileTokenBudget,
-      state.config.resolvedPeerId,
-    )
-    state.profileBlock = profile?.block
-      ? [
-          '<openviking-context source="profile">',
-          profile.block,
-          '</openviking-context>',
-        ].join('\n')
-      : ''
+    // Building the profile block means extra remote reads every session; skip
+    // it entirely when profile injection is disabled so session init never
+    // pays for a block that would not be delivered.
+    if (state.config.injectProfile !== false) {
+      const profile = await buildProfileBlock(
+        (path, init, options) => this.client.fetchJSON(path, init, options),
+        state.config.profileTokenBudget,
+        state.config.resolvedPeerId,
+      )
+      state.profileBlock = profile?.block
+        ? [
+            '<openviking-context source="profile">',
+            profile.block,
+            '</openviking-context>',
+          ].join('\n')
+        : ''
+    } else {
+      state.profileBlock = ''
+    }
     state.ready = true
     return state
   }
 
   async profileMessage(agent: { session: SessionLike }): Promise<ReturnType<typeof createUserMessage> | null> {
     const state = await this.initialize(agent)
+    if (state.config.injectProfile === false) return null
     if (!state.ready || !state.profileBlock || state.profileDelivered) return null
     state.profileDelivered = true
     return pluginMessage(state.profileBlock, 'instructions')
@@ -197,6 +205,47 @@ export class OpenVikingRuntime {
       },
     )
     return block ? pluginMessage(block, 'recall') : null
+  }
+
+  /**
+   * Build the pre-step context additions (profile + recall) concurrently under
+   * one hard deadline. Profile construction is independent of the final message
+   * batch, so the caller may hand in an already-started profile promise to
+   * overlap its HTTP round-trips with the downstream pre-step waterfall; recall
+   * needs the batch and starts here. A slow or unreachable OpenViking server
+   * must never stall a model step: whichever side misses the deadline is
+   * dropped for that step (null), while its underlying work keeps running and
+   * is picked up by the next pre-step.
+   */
+  async preStepContext(
+    agent: { session: SessionLike },
+    messages: ReadonlyArray<unknown>,
+    options: { profile?: Promise<ReturnType<typeof createUserMessage> | null>; deadlineMs?: number } = {},
+  ): Promise<{
+    profile: ReturnType<typeof createUserMessage> | null
+    recall: ReturnType<typeof createUserMessage> | null
+  }> {
+    const deadlineMs = Math.max(0, Math.floor(Number(options.deadlineMs) || 0))
+    const profile = options.profile ?? this.profileMessage(agent)
+    const underDeadline = async (
+      promise: Promise<ReturnType<typeof createUserMessage> | null>,
+    ): Promise<ReturnType<typeof createUserMessage> | null> => {
+      if (deadlineMs <= 0) return promise
+      let timer: NodeJS.Timeout | undefined
+      try {
+        const timeout = new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), deadlineMs)
+        })
+        return await Promise.race([promise.catch(() => null), timeout])
+      } finally {
+        if (timer) clearTimeout(timer)
+      }
+    }
+    const [profileResult, recallResult] = await Promise.all([
+      underDeadline(profile),
+      underDeadline(this.recallMessage(agent, messages)),
+    ])
+    return { profile: profileResult, recall: recallResult }
   }
 
   capture(session: SessionLike, event: Record<string, unknown>): void {

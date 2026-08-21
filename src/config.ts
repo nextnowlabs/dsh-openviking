@@ -39,6 +39,8 @@ export interface OpenVikingSettings {
   workspacePeer: boolean
   /** Recall peer scope: `all` for cross-workspace recall or `actor` for isolation. */
   recallPeerScope: 'all' | 'actor'
+  /** Hard deadline (ms) for one pre-step recall attempt; past it, recall is skipped. */
+  recallTimeoutMs: number
   /** Server-side query expansion: `off` to disable or `auto`. */
   recallQueryExpansion: 'off' | 'auto'
   /** Whether to capture turns synchronously on session/event. */
@@ -57,6 +59,8 @@ export interface OpenVikingSettings {
   minQueryLength: number
   /** Token budget for the session-start profile injection. */
   profileTokenBudget: number
+  /** Whether the per-session profile block (user-profile + available-memories) is injected. */
+  injectProfile: boolean
   /** Pending-token threshold that triggers a commit at turn/end. */
   commitTokenThreshold: number
   /** Recent messages kept verbatim by a commit. */
@@ -100,6 +104,7 @@ export const Config: Schema<OpenVikingSettings> = z.object({
   peerId: z.string().default(''),
   workspacePeer: z.boolean().default(true),
   recallPeerScope: z.union(['all', 'actor'] as const).default('all'),
+  recallTimeoutMs: z.number().default(6000),
   recallQueryExpansion: z.union(['off', 'auto'] as const).default('auto'),
   syncTurns: z.boolean().default(true),
   recallTokenBudget: z.number().default(2000),
@@ -109,6 +114,7 @@ export const Config: Schema<OpenVikingSettings> = z.object({
   scoreThreshold: z.number().default(0.35),
   minQueryLength: z.number().default(3),
   profileTokenBudget: z.number().default(10000),
+  injectProfile: z.boolean().default(true),
   commitTokenThreshold: z.number().default(20000),
   commitKeepRecentCount: z.number().default(10),
   captureToolResults: z.boolean().default(false),
@@ -160,6 +166,7 @@ export function resolveConfig(
   config.workspacePeer = config.workspacePeer !== false
   config.resolvedPeerId = resolveEffectivePeerId({ cfg: { peerId: config.peerId, workspacePeer: config.workspacePeer }, cwd }).peerId
   config.recallPeerScope = config.recallPeerScope === 'actor' ? 'actor' : 'all'
+  config.recallTimeoutMs = clampInteger(config.recallTimeoutMs, 1000, 30000, 6000)
   config.recallQueryExpansion = config.recallQueryExpansion === 'off' ? 'off' : 'auto'
   config.recallLimit = clampInteger(config.recallLimit, 1, 50, 10)
   config.recallMaxContentChars = clampInteger(config.recallMaxContentChars, 100, 5000, 500)
@@ -177,6 +184,7 @@ export function resolveConfig(
   config.captureAssistantTurns = config.captureAssistantTurns !== false
   config.captureToolResults = config.captureToolResults === true
   config.injectSkills = config.injectSkills !== false
+  config.injectProfile = config.injectProfile !== false
   config.recallQueryExpansionConfigured = Object.prototype.hasOwnProperty.call(input, 'recallQueryExpansion')
   config.recallLimitConfigured = Object.prototype.hasOwnProperty.call(input, 'recallLimit')
   return config
@@ -191,6 +199,7 @@ function defaults(): OpenVikingConfig {
     peerId: '',
     workspacePeer: true,
     recallPeerScope: 'all',
+    recallTimeoutMs: 6000,
     recallQueryExpansion: 'auto',
     syncTurns: true,
     recallTokenBudget: 2000,
@@ -200,6 +209,7 @@ function defaults(): OpenVikingConfig {
     scoreThreshold: 0.35,
     minQueryLength: 3,
     profileTokenBudget: 10000,
+    injectProfile: true,
     commitTokenThreshold: 20000,
     commitKeepRecentCount: 10,
     captureToolResults: false,
