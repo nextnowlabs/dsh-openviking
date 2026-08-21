@@ -60,7 +60,8 @@ export interface OpenVikingSkillMetadata {
 
 export interface OpenVikingSkillProviderOptions {
   client: OpenVikingClient
-  config: OpenVikingConfig
+  /** Live config source; read per discovery/load so settings changes apply immediately. */
+  config: () => OpenVikingConfig
 }
 
 /**
@@ -78,7 +79,7 @@ export function registerOpenVikingSkillProvider(
 class OpenVikingSkillProvider implements SkillProvider {
   readonly name = OPENVIKING_SKILL_PROVIDER
   private readonly client: OpenVikingClient
-  private readonly config: OpenVikingConfig
+  private readonly config: () => OpenVikingConfig
 
   constructor(options: OpenVikingSkillProviderOptions) {
     this.client = options.client
@@ -92,7 +93,7 @@ class OpenVikingSkillProvider implements SkillProvider {
    */
   async list(options: SkillLookupOptions): Promise<readonly SkillCandidate[] | SkillProviderObservation> {
     options.signal?.throwIfAborted()
-    const { ok, skills } = await this.client.listSkills({ actorPeerId: this.config.resolvedPeerId })
+    const { ok, skills } = await this.client.listSkills({ actorPeerId: this.config().resolvedPeerId })
     options.signal?.throwIfAborted()
     if (!ok) return { candidates: [], complete: false }
 
@@ -135,7 +136,7 @@ class OpenVikingSkillProvider implements SkillProvider {
     const detail = await this.client.getSkill(locator.skillName, {
       targetUri: locator.targetUri,
       includeContent: true,
-      actorPeerId: this.config.resolvedPeerId,
+      actorPeerId: this.config().resolvedPeerId,
     })
     options.signal?.throwIfAborted()
     if (!detail) return undefined

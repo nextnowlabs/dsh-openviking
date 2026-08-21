@@ -33,7 +33,7 @@ function captureProvider(client: OpenVikingClient) {
       },
     },
   }
-  registerOpenVikingSkillProvider(ctx as never, { client, config: fakeConfig() })
+  registerOpenVikingSkillProvider(ctx as never, { client, config: () => fakeConfig() })
   if (!provider) throw new Error('provider not registered')
   return provider
 }

@@ -22,7 +22,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-settings'
+import { installSettingsSection } from '@deepseek-ai/dsh-settings'
 import { OpenVikingClient } from './ov-client.ts'
 import {
   Config,
@@ -37,25 +37,22 @@ import { registerOpenVikingTools } from './tools.ts'
 import { guardVikingUri } from './uri-guard.ts'
 
 export const name = 'openviking-memory'
-export const inject = ['agents', 'sessions', 'tools', 'settings', 'skills']
+export const inject = ['agents', 'sessions', 'tools', 'skills']
 
 export { Config, OPENVIKING_SETTINGS_NAMESPACE }
 
 /** Plugin entry: register settings, then mount the runtime and lifecycle hooks. */
 export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): () => void {
-  // Registration validates the section through the schema; resolveConfig adds
-  // env/config-file fallbacks and clamps. A hand-edited invalid section fails
-  // registration loud instead of silently disabling the runtime.
-  const settings = ctx.settings.register(OPENVIKING_SETTINGS_NAMESPACE, Config, {
-    base: input,
-    applies: 'live',
-    validate: (value) => { resolveConfig(value) },
-  })
-  const runtime = new OpenVikingRuntime(
-    new OpenVikingClient(resolveConfig(settings.get())),
-    resolveConfig(settings.get()),
-    ctx.logger,
-  )
+  // The active configuration source: the resolved `openviking` settings section
+  // while a settings service is mounted, the composition entry otherwise. The
+  // settings dependency is deliberately OPTIONAL (installSettingsSection): on
+  // host profiles without a settings provider the plugin must still activate
+  // and run on the entry config instead of hanging the boot report on a
+  // missing `settings` service.
+  let source: () => Partial<OpenVikingSettings> = () => input
+  let config = resolveConfig(input)
+
+  const runtime = new OpenVikingRuntime(new OpenVikingClient(config), config, ctx.logger)
   ctx.provide('openvikingMemory', runtime)
   ctx.effect(
     () => () => runtime.disposeAll(),
@@ -64,27 +61,45 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
 
   registerOpenVikingTools(ctx, runtime.client, runtime)
 
-  // Inject skills saved in OpenViking into the DSH skill catalog (provider
-  // name `openviking`). Disabled by the `injectSkills` setting; the provider
-  // disposes together with the plugin's effect lifetime.
-  const resolvedConfig = resolveConfig(settings.get())
-  if (resolvedConfig.injectSkills) {
-    ctx.effect(
-      () => registerOpenVikingSkillProvider(ctx, { client: runtime.client, config: resolvedConfig }),
-      'openvikingMemory.skillProvider',
-    )
-  }
-
-  // Reconfigure the runtime live when the settings document changes.
-  ctx.effect(() => settings.watch(async (next) => {
+  // Re-derive the full config and push it into the runtime whenever the source
+  // changes (settings attach/detach/commit). Reads ride `config`, so the skill
+  // provider below always sees the latest values.
+  const applyConfig = (): void => {
     try {
-      runtime.reconfigure(resolveConfig(next))
+      config = resolveConfig(source())
+      runtime.reconfigure(config)
       ctx.logger.info('[openviking:dsh] settings applied')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       ctx.logger.warn('[openviking:dsh] keeping previous config after a refused settings change: %s', message)
     }
-  }), 'openvikingMemory.settingsWatch')
+  }
+
+  // Inject skills saved in OpenViking into the DSH skill catalog (provider
+  // name `openviking`). Disabled by the `injectSkills` setting; the provider
+  // reads the live config and disposes together with the plugin's effect
+  // lifetime.
+  if (resolveConfig(input).injectSkills) {
+    ctx.effect(
+      () => registerOpenVikingSkillProvider(ctx, {
+        client: runtime.client,
+        config: () => config,
+      }),
+      'openvikingMemory.skillProvider',
+    )
+  }
+
+  // Optional settings wiring: register the `openviking` namespace and reapply
+  // on change when a settings service exists (desktop/host profiles); on
+  // profiles without one the plugin keeps the composition entry config, so
+  // activation never blocks on the service.
+  installSettingsSection(ctx, OPENVIKING_SETTINGS_NAMESPACE, Config, input as OpenVikingSettings, {
+    // `onChange` runs right after `setSource` on attach/detach, so re-deriving
+    // only there (never here) avoids a redundant double re-apply at startup.
+    setSource: (next) => { source = next },
+    onChange: applyConfig,
+    validate: (value) => { resolveConfig(value) },
+  })
 
   ctx.on('agent/session-start', ({ agent }) => {
     agent.ctx.effect(

@@ -5,14 +5,9 @@ function makeCtx() {
   const handlers = new Map<string, (...args: never[]) => unknown>()
   const ctx = {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    settings: {
-      register() {
-        return {
-          get: () => ({ endpoint: 'http://127.0.0.1:1933', workspacePeer: false }),
-          watch: () => () => {},
-        }
-      },
-    },
+    // The settings wiring is optional (installSettingsSection): no settings
+    // service is mounted here, so activation must proceed on the entry config.
+    inject() {},
     provide() {},
     effect(execute: () => unknown) {
       execute()

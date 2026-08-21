@@ -320,8 +320,13 @@ function SelectField({ field, value, writable, t, onCommit }: {
   )
 }
 
-/** Required client services. */
-export const inject = ['slots', 'locale', 'settings']
+/**
+ * Required client services. The settings capability on the browser side is the
+ * `settingsScope` service provided by `@deepseek-ai/dsh-client-ui-settings`;
+ * there is no `settings` service in the client context, so depending on it here
+ * would leave this entry pending forever on the web boot.
+ */
+export const inject = ['slots', 'locale', 'settingsScope']
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {

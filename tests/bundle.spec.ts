@@ -6,12 +6,13 @@ import { describe, expect, it } from 'vitest'
 const PLUGIN_DIR = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
 
 // Product-specific identifiers that must never leak into the published bundle.
-// Built from parts so this very test cannot match itself.
+// Built from parts so this very test cannot match itself. The public
+// `nextnowlabs` scope is excluded: it is the package's own published name and
+// repository, so it is not a leak by construction.
 const frag = (...parts: string[]) => parts.join('')
 const FORBIDDEN_PATTERN = new RegExp([
   frag('ark', '-toolkit'),
   frag('dsh', '-vision', '-toolkit'),
-  frag('next', 'nowlabs'),
   frag('vision', '_glance'),
   frag('vision', '_generate', '_image'),
   frag('vision', '_speak'),
@@ -56,7 +57,8 @@ describe('bundle shape', () => {
     expect((manifest.dsh as Record<string, unknown>).bundle).toEqual({ patch: './cordis.patch.yml' })
     expect(patch).toMatch(/name: '@deepseek-ai\/cordis-plugin-group'/)
     expect(patch).toMatch(/openvikingMemory: true/)
-    expect(patch).toMatch(/name: '@openviking\/dsh-memory-plugin'/)
+    expect(patch).toMatch(/name: '@nextnowlabs\/dsh-openviking'/)
+    expect(patch).toMatch(/id: openviking-memory/)
     expect(JSON.stringify(manifest)).not.toMatch(FORBIDDEN_PATTERN)
     expect(patch).not.toMatch(FORBIDDEN_PATTERN)
   })
