@@ -9,6 +9,7 @@
 - **会话捕获（Session capture）** — `session/event` 捕获用户、助手以及（可选）工具结果消息，无需抓取对话记录；`turn/end` 在待处理令牌数达到阈值时提交。
 - **离线韧性（Offline resilience）** — 写入失败的内容进入 `~/.openviking/pending/`，并在下次会话开始时重放。
 - **`viking://` 保护** — `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将虚拟 URI 当作本地路径处理。
+- **技能注入（Skill catalog）** — 注册名为 `openviking` 的 DSH 技能 provider，把保存在 OpenViking 中的技能（`viking://user/<space>/skills/` 与共享的 `viking://agent/skills`）注入进会话的 `<available_skills>` 目录；模型可像本地技能一样用 `skill` 工具按需加载完整正文。
 - **记忆工具** — 14 个 `viking_*` 工具，涵盖检索、读写、浏览、归档展开与监视管理（见[工具](#工具)）。
 - **设置** — 连接身份与召回/捕获调优可在 **设置 → OpenViking** 中实时配置。
 
@@ -72,6 +73,7 @@ OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设
 | 召回优先摘要 `recallPreferAbstract` | | 开 | 回退召回优先使用摘要而非全文 |
 | 最小查询长度 `minQueryLength` | | `3` | 低于该长度不触发召回 |
 | 画像令牌预算 `profileTokenBudget` | | `10000` | 会话开始时画像注入的令牌预算 |
+| 技能注入 `injectSkills` | ✓ | 开 | 将 OpenViking 中保存的技能注入 DSH 技能目录 |
 
 ### 捕获
 
@@ -115,8 +117,20 @@ OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设
 - `turn/end` 检查待处理令牌阈值，并在需要时提交。
 - 写入失败的内容进入共享的待处理队列，在下次会话开始时重放。
 - `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将 `viking://` URI 当作本地路径处理。
+- `ctx.skills` 上注册名为 `openviking` 的技能 provider：目录发现走 `GET /api/v1/skills`，正文按需经 `GET /api/v1/skills/{name}?include_content=true` 加载。每个会话构建技能目录时都会重新发现，OpenViking 中新增/修改/删除的技能随即反映到 `<available_skills>`。
 
 每个 DSH 会话都映射到 OpenViking 中的 `dsh-<session-id>`。由工作区推导的 actor 对等节点按会话解析，并随每个会话级请求发送。
+
+## 技能注入
+
+开启 `injectSkills`（默认开）后，保存在 OpenViking 中的技能会作为名为 `openviking` 的 provider 进入 DSH 技能目录，与本地文件系统技能共用同一套 `skill` 工具与 `<available_skills>` 机制：
+
+- **数据来源** — `GET /api/v1/skills` 返回当前用户私有技能（`viking://user/<space>/skills/`）与账户共享 Agent 技能（`viking://agent/skills`）的合并列表；同名时私有技能优先。
+- **技能格式** — 与 DSH 本地技能一致：`SKILL.md` 携带 YAML frontmatter（`name`、`description`，可选 `tags`、`allowed_tools`）。正文中的 frontmatter 会被剥离，仅把说明正文注入 `<skill_instructions>`。
+- **优先级** — 排名固定为 `550`：本地用户技能（400–500）优先于同名 OpenViking 技能，而 OpenViking 技能仍高于内置技能（600）。
+- **失败韧性** — 服务器不可达时该轮发现报告为不完整（不会把空目录当作权威结果缓存）；无技能时贡献为空，不影响会话。
+
+用 OpenViking 的 `ov add-skill ./skills/my-skill/`（或 Web 端）保存技能后，新建 DSH 会话即可在技能目录中看到并加载它。
 
 ## 工具
 

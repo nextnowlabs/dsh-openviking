@@ -9,7 +9,9 @@
  *   - captures user/assistant/tool events without scraping the transcript;
  *   - commits when the pending-token threshold is crossed, and queues failed
  *     writes for replay at the next session start;
- *   - blocks DSH filesystem/shell tools from treating `viking://` as local paths.
+ *   - blocks DSH filesystem/shell tools from treating `viking://` as local paths;
+ *   - injects skills saved in OpenViking into the DSH skill catalog through a
+ *     `ctx.skills` provider named `openviking` (see `skill-provider.ts`).
  *
  * Recall and profile context enter as `source: { kind: 'plugin' }` user
  * messages, deliberately not the system prompt: a `complete: true` persona
@@ -30,11 +32,12 @@ import {
 } from './config.ts'
 import { injectStartupProfile } from './lifecycle.ts'
 import { OpenVikingRuntime } from './runtime.ts'
+import { registerOpenVikingSkillProvider } from './skill-provider.ts'
 import { registerOpenVikingTools } from './tools.ts'
 import { guardVikingUri } from './uri-guard.ts'
 
 export const name = 'openviking-memory'
-export const inject = ['agents', 'sessions', 'tools', 'settings']
+export const inject = ['agents', 'sessions', 'tools', 'settings', 'skills']
 
 export { Config, OPENVIKING_SETTINGS_NAMESPACE }
 
@@ -60,6 +63,17 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
   )
 
   registerOpenVikingTools(ctx, runtime.client, runtime)
+
+  // Inject skills saved in OpenViking into the DSH skill catalog (provider
+  // name `openviking`). Disabled by the `injectSkills` setting; the provider
+  // disposes together with the plugin's effect lifetime.
+  const resolvedConfig = resolveConfig(settings.get())
+  if (resolvedConfig.injectSkills) {
+    ctx.effect(
+      () => registerOpenVikingSkillProvider(ctx, { client: runtime.client, config: resolvedConfig }),
+      'openvikingMemory.skillProvider',
+    )
+  }
 
   // Reconfigure the runtime live when the settings document changes.
   ctx.effect(() => settings.watch(async (next) => {

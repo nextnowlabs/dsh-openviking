@@ -65,6 +65,8 @@ export interface OpenVikingSettings {
   captureToolResults: boolean
   /** Whether assistant turns are captured into memory. */
   captureAssistantTurns: boolean
+  /** Whether skills saved in OpenViking are injected into the DSH skill catalog. */
+  injectSkills: boolean
   /** Capture mode: `semantic` or `keyword`. */
   captureMode: 'semantic' | 'keyword'
   /** Max characters captured per message. */
@@ -111,6 +113,7 @@ export const Config: Schema<OpenVikingSettings> = z.object({
   commitKeepRecentCount: z.number().default(10),
   captureToolResults: z.boolean().default(false),
   captureAssistantTurns: z.boolean().default(true),
+  injectSkills: z.boolean().default(true),
   captureMode: z.union(['semantic', 'keyword'] as const).default('semantic'),
   captureMaxLength: z.number().default(24000),
   captureToolMaxChars: z.number().default(1000000),
@@ -173,6 +176,7 @@ export function resolveConfig(
   config.syncTurns = config.syncTurns !== false
   config.captureAssistantTurns = config.captureAssistantTurns !== false
   config.captureToolResults = config.captureToolResults === true
+  config.injectSkills = config.injectSkills !== false
   config.recallQueryExpansionConfigured = Object.prototype.hasOwnProperty.call(input, 'recallQueryExpansion')
   config.recallLimitConfigured = Object.prototype.hasOwnProperty.call(input, 'recallLimit')
   return config
@@ -200,6 +204,7 @@ function defaults(): OpenVikingConfig {
     commitKeepRecentCount: 10,
     captureToolResults: false,
     captureAssistantTurns: true,
+    injectSkills: true,
     captureMode: 'semantic',
     captureMaxLength: 24000,
     captureToolMaxChars: 1000000,

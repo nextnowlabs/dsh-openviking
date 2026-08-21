@@ -88,6 +88,45 @@ export interface WatchTask {
   [key: string]: unknown
 }
 
+/** One installed agent skill as returned by `GET /api/v1/skills`. */
+export interface SkillEntry {
+  type?: string
+  name: string
+  uri?: string
+  root_uri?: string
+  skill_md_uri?: string
+  description?: string
+  tags?: string[]
+  allowed_tools?: string[]
+  score?: number
+  [key: string]: unknown
+}
+
+/** Detail returned by `GET /api/v1/skills/{name}` with `include_content=true`. */
+export interface SkillDetail {
+  name?: string
+  description?: string
+  uri?: string
+  root_uri?: string
+  skill_md_uri?: string
+  content?: string
+  abstract?: string
+  overview?: string
+  tags?: string[]
+  allowed_tools?: string[]
+  [key: string]: unknown
+}
+
+/** Skill scope selector for the skills API (`target_uri`). */
+export interface SkillScopeOptions {
+  /** OpenViking `target_uri` disambiguator: `viking://agent/skills` or a user skills root. */
+  targetUri?: string
+  /** Per-session actor peer override. */
+  actorPeerId?: string
+  /** Request timeout override. */
+  timeoutMs?: number
+}
+
 export class OpenVikingClient {
   connected = false
 
@@ -387,6 +426,52 @@ export class OpenVikingClient {
     )
     const result = response.ok && response.result ? response.result as Record<string, unknown> : null
     return result && Array.isArray(result.matches) ? result.matches as GlobEntry[] : []
+  }
+
+  /**
+   * List installed agent skills for the current user plus shared agent skills.
+   * @param options - `nodeLimit` caps the returned count; `actorPeerId` selects the requesting peer.
+   * @returns `ok: false` on transport/server failure so callers can report an
+   *   incomplete observation; otherwise the merged skill entries.
+   */
+  async listSkills(options: { nodeLimit?: number, actorPeerId?: string } = {}): Promise<{ ok: boolean, skills: SkillEntry[] }> {
+    const query = [`node_limit=${options.nodeLimit ?? 1000}`]
+    const response = await this.fetchJSON(
+      `/api/v1/skills?${query.join('&')}`,
+      {},
+      this.peer(options.actorPeerId),
+    )
+    const result = response.ok && response.result ? response.result as Record<string, unknown> : null
+    if (!result || !Array.isArray(result.skills)) return { ok: false, skills: [] }
+    return {
+      ok: true,
+      skills: (result.skills as unknown[]).flatMap(entry =>
+        entry && typeof entry === 'object' ? [entry as SkillEntry] : [],
+      ),
+    }
+  }
+
+  /**
+   * Read one installed skill's metadata and (optionally) full SKILL.md content.
+   * @param skillName - kebab-case skill name.
+   * @param options - `targetUri` disambiguates duplicate user/agent names; `includeContent` fetches the body.
+   * @returns the skill detail, or `null` on failure / not found.
+   */
+  async getSkill(
+    skillName: string,
+    options: SkillScopeOptions & { includeContent?: boolean } = {},
+  ): Promise<SkillDetail | null> {
+    const params = new URLSearchParams({
+      include_files: 'false',
+      include_content: options.includeContent === true ? 'true' : 'false',
+    })
+    if (options.targetUri) params.set('target_uri', options.targetUri)
+    const response = await this.fetchJSON(
+      `/api/v1/skills/${encodeURIComponent(skillName)}?${params.toString()}`,
+      {},
+      { timeoutMs: options.timeoutMs, ...this.peer(options.actorPeerId) },
+    )
+    return response.ok && response.result ? response.result as SkillDetail : null
   }
 
   /** List watch tasks (re-ingestion schedules). */

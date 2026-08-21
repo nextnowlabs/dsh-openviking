@@ -317,4 +317,66 @@ describe('OpenVikingClient', () => {
     expect(cancelResult).toBe(true)
     expect(seenUrl).toBe('http://127.0.0.1:1933/api/v1/watches?to_uri=viking%3A%2F%2Fnotes.md|DELETE')
   })
+
+  it('lists installed skills through the skills API', async () => {
+    let seenUrl = ''
+    globalThis.fetch = async (url) => {
+      seenUrl = String(url)
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: {
+          root_uris: ['viking://user/default/skills', 'viking://agent/skills'],
+          skills: [
+            { type: 'skill', name: 'search-web', root_uri: 'viking://user/default/skills/search-web', description: 'Search the web' },
+          ],
+          total: 1,
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    const result = await client.listSkills({ nodeLimit: 500 })
+
+    expect(seenUrl).toBe('http://127.0.0.1:1933/api/v1/skills?node_limit=500')
+    expect(result.ok).toBe(true)
+    expect(result.skills[0]).toMatchObject({ name: 'search-web' })
+
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      status: 'error',
+      error: { code: 'FAILED', message: 'down' },
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } })
+    expect(await client.listSkills()).toEqual({ ok: false, skills: [] })
+  })
+
+  it('reads one skill with content through the skills API', async () => {
+    let seenUrl = ''
+    globalThis.fetch = async (url) => {
+      seenUrl = String(url)
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: {
+          name: 'search-web',
+          root_uri: 'viking://agent/skills/search-web',
+          content: '---\nname: search-web\ndescription: Search\n---\n\nBody.',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+
+    const detail = await client.getSkill('search-web', {
+      targetUri: 'viking://agent/skills',
+      includeContent: true,
+    })
+
+    expect(seenUrl).toBe(
+      'http://127.0.0.1:1933/api/v1/skills/search-web?include_files=false&include_content=true&target_uri=viking%3A%2F%2Fagent%2Fskills',
+    )
+    expect(detail?.content).toContain('Body.')
+  })
 })

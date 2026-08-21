@@ -19,6 +19,7 @@ function makeCtx() {
       return () => {}
     },
     tools: { register() {} },
+    skills: { registerProvider() { return () => {} } },
     on(name: string, handler: (...args: never[]) => unknown) {
       handlers.set(name, handler)
     },
