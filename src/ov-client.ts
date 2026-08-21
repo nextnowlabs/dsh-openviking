@@ -129,8 +129,21 @@ export interface SkillScopeOptions {
 
 export class OpenVikingClient {
   connected = false
+  config: OpenVikingConfig
 
-  constructor(readonly config: OpenVikingConfig) {}
+  constructor(config: OpenVikingConfig) {
+    this.config = config
+  }
+
+  /**
+   * Swap the live configuration in place. The client is constructed once at
+   * plugin apply with the composition entry (usually defaults); the DSH
+   * settings service attaches afterwards, so settings changes must be pushed
+   * into the client or every request would keep using the old endpoint/key.
+   */
+  reconfigure(config: OpenVikingConfig): void {
+    this.config = config
+  }
 
   headers(options: FetchOptions = {}): Record<string, string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }

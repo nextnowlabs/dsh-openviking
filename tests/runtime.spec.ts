@@ -42,6 +42,22 @@ function userEvent(text: string) {
 }
 
 describe('OpenVikingRuntime', () => {
+  it('reconfigure propagates settings into the HTTP client', () => {
+    const reconfigured: string[] = []
+    const runtime = new OpenVikingRuntime({
+      reconfigure(next: { endpoint: string }) {
+        reconfigured.push(next.endpoint)
+      },
+    } as never, config(), { debug() {} } as never)
+
+    runtime.reconfigure(resolveConfig({
+      endpoint: 'https://api.vikingdb.cn-beijing.volces.com/openviking',
+      peerId: 'p1',
+    }))
+
+    expect(reconfigured).toEqual(['https://api.vikingdb.cn-beijing.volces.com/openviking'])
+  })
+
   it('queues retryable capture failures but drops permanent client errors', async () => {
     for (const [status, expectedPending] of [[400, 0], [503, 1]]) {
       const pendingDir = await mkdtemp(join(tmpdir(), `dsh-memory-${status}-`))

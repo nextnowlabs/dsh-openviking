@@ -102,6 +102,38 @@ describe('OpenVikingClient', () => {
     expect(await client.ensureSession('dsh-resume')).toBe(true)
   })
 
+  it('reconfigures the endpoint and credentials used by later requests', async () => {
+    let seen: { url: string, init: RequestInit }
+    globalThis.fetch = async (url, init) => {
+      seen = { url: String(url), init: init as RequestInit }
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: [{ name: 'skill-a', isDir: true }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+    client.reconfigure(resolveConfig({
+      endpoint: 'https://api.vikingdb.cn-beijing.volces.com/openviking',
+      apiKey: 'new-key',
+      account: '',
+      user: '',
+      peerId: '',
+      recallQueryExpansion: 'auto',
+      recallLimit: 10,
+    }))
+
+    const entries = await client.list('viking://user/default/skills')
+
+    expect(entries).toHaveLength(1)
+    expect(seen.url).toBe(
+      'https://api.vikingdb.cn-beijing.volces.com/openviking/api/v1/fs/ls?uri=viking%3A%2F%2Fuser%2Fdefault%2Fskills&output=original',
+    )
+    expect(seen.init.headers!['Authorization']).toBe('Bearer new-key')
+  })
+
   it('requests the raw array contract for directory listings', async () => {
     let seenUrl = ''
     globalThis.fetch = async (url) => {

@@ -74,6 +74,11 @@ export class OpenVikingRuntime {
    */
   reconfigure(config: OpenVikingConfig): void {
     this.config = config
+    // The HTTP client was built against the apply-time entry config; keep it
+    // in sync so endpoints/credentials/peer scope from the settings document
+    // actually reach the wire. Without this, every request keeps the defaults
+    // (http://127.0.0.1:1933, no key) and tools report empty directories.
+    this.client.reconfigure?.(config)
     for (const state of this.states.values()) {
       const peerId = resolveEffectivePeerId({
         cfg: { peerId: config.explicitPeerId, workspacePeer: config.workspacePeer },
