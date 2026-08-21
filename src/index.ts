@@ -35,9 +35,10 @@ import { OpenVikingRuntime } from './runtime.ts'
 import { registerOpenVikingSkillProvider } from './skill-provider.ts'
 import { registerOpenVikingTools } from './tools.ts'
 import { guardVikingUri } from './uri-guard.ts'
+import { installOpenVikingWeb, OpenVikingWebBackend } from './web.ts'
 
 export const name = 'openviking-memory'
-export const inject = ['agents', 'sessions', 'tools', 'skills']
+export const inject = ['agents', 'sessions', 'tools', 'skills', 'credentials']
 
 export { Config, OPENVIKING_SETTINGS_NAMESPACE }
 
@@ -52,7 +53,22 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
   let source: () => Partial<OpenVikingSettings> = () => input
   let config = resolveConfig(input)
 
-  const runtime = new OpenVikingRuntime(new OpenVikingClient(config), config, ctx.logger)
+  // The Bearer key never rides the settings document or the plugin config: it
+  // is resolved once per request from the DSH credential store under the
+  // `credential` reference (an environment-style name). The optional chain
+  // keeps activation working on host profiles without a credentials provider.
+  // The closure reads the live `config` binding (reassigned by `applyConfig`),
+  // so a changed credential reference reaches the next request immediately.
+  const client = new OpenVikingClient(config, {
+    resolveApiKey: () => {
+      const credentials = ctx.credentials
+      return credentials === undefined
+        ? Promise.resolve(undefined)
+        : credentials.resolve(config.credential).then(resolved => resolved?.value)
+    },
+  })
+
+  const runtime = new OpenVikingRuntime(client, config, ctx.logger)
   ctx.provide('openvikingMemory', runtime)
   ctx.effect(
     () => () => runtime.disposeAll(),
@@ -60,6 +76,10 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
   )
 
   registerOpenVikingTools(ctx, runtime.client, runtime)
+
+  // Optional Web routes: the browser Settings section reads the credential
+  // status snapshot and writes a new API key through ctx.credentials.
+  installOpenVikingWeb(ctx, new OpenVikingWebBackend(ctx))
 
   // Re-derive the full config and push it into the runtime whenever the source
   // changes (settings attach/detach/commit). Reads ride `config`, so the skill

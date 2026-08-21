@@ -3,15 +3,21 @@
  *
  * Binds the `openviking` settings namespace through `ctx.settingsScope` and
  * renders connection identity plus recall/capture tuning, writing each field
- * through the namespace's revision-fenced `set` path.
+ * through the namespace's revision-fenced `set` path. The API key is NOT a
+ * settings field: it lives in the DSH credential store under the configured
+ * `credential` reference, read and written through the same-origin
+ * `/_dsh/openviking/settings` route (see `src/web.ts`); the browser only ever
+ * sees whether the credential is configured and where it comes from.
  */
 
 import {
+  useEffect,
+  useState,
   useSyncExternalStore,
   type ChangeEvent,
   type ReactNode,
 } from 'react'
-import { Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
@@ -20,6 +26,8 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 const NS = 'openviking'
 const NAV_LABEL = 'OpenViking'
 const NAV_LABEL_ZH = 'OpenViking 记忆'
+/** Keep in sync with `OPENVIKING_SETTINGS_ROUTE` in `src/web.ts`. */
+const SETTINGS_ROUTE = '/_dsh/openviking/settings'
 
 type LocaleDict = {
   nav: string
@@ -29,9 +37,22 @@ type LocaleDict = {
   connection: string
   endpoint: string
   endpointHint: string
+  credential: string
+  credentialHint: string
   apiKey: string
   apiKeyHint: string
-  apiKeyPlaceholder: string
+  apiKeyPlaceholderMissing: string
+  apiKeyPlaceholderConfigured: string
+  apiKeyBlank: string
+  apiKeyInvalid: string
+  apiKeyLocked: string
+  credentialConfigured: string
+  credentialMissing: string
+  sourceHint: string
+  source: string
+  saveKey: string
+  savingKey: string
+  keySaved: string
   account: string
   accountHint: string
   user: string
@@ -40,17 +61,30 @@ type LocaleDict = {
   peerIdHint: string
   behavior: string
   workspacePeer: string
+  workspacePeerHint: string
   recallPeerScope: string
   recallPeerScopeAll: string
   recallPeerScopeActor: string
+  recallPeerScopeHint: string
   recallLimit: string
+  recallLimitHint: string
   recallTokenBudget: string
+  recallTokenBudgetHint: string
   scoreThreshold: string
+  scoreThresholdHint: string
   commitTokenThreshold: string
+  commitTokenThresholdHint: string
+  injectProfile: string
+  injectProfileHint: string
+  injectSkills: string
+  injectSkillsHint: string
   capture: string
   captureToolResults: string
+  captureToolResultsHint: string
   captureAssistantTurns: string
+  captureAssistantTurnsHint: string
   syncTurns: string
+  syncTurnsHint: string
   statusReady: string
   statusLoading: string
   statusUnavailable: string
@@ -65,29 +99,55 @@ const en: LocaleDict = {
   externalNotice: 'Captured session content and recall queries are sent to the configured OpenViking server.',
   connection: 'Connection',
   endpoint: 'Server endpoint',
-  endpointHint: 'OpenViking base URL, e.g. http://127.0.0.1:1933.',
+  endpointHint: 'OpenViking server base URL, e.g. http://127.0.0.1:1933 (default). Applies immediately.',
+  credential: 'Credential name',
+  credentialHint: 'The DSH credential reference that stores the OpenViking API key. The key is stored in DSH Credentials and never shown again after saving.',
   apiKey: 'API key',
-  apiKeyHint: 'Stored in the settings document and redacted on every wire surface.',
-  apiKeyPlaceholder: 'Leave blank to keep the saved key',
+  apiKeyHint: 'The key is stored in DSH Credentials and is never shown again after saving.',
+  apiKeyPlaceholderMissing: 'Paste the API key',
+  apiKeyPlaceholderConfigured: 'Saved; leave blank to keep it',
+  apiKeyBlank: 'The API key cannot contain only spaces.',
+  apiKeyInvalid: 'Paste only the key, without a variable name, quotes, spaces, or line breaks.',
+  apiKeyLocked: 'The current key comes from a read-only source and cannot be replaced here.',
+  credentialConfigured: 'configured',
+  credentialMissing: 'missing',
+  sourceHint: 'Current source: {source}',
+  source: 'source',
+  saveKey: 'Save key',
+  savingKey: 'Saving…',
+  keySaved: 'Key saved',
   account: 'Account',
-  accountHint: 'Trusted-mode account.',
+  accountHint: 'Trusted-mode account identity sent with requests. Leave blank unless your server uses trusted mode.',
   user: 'User',
-  userHint: 'Trusted-mode user.',
+  userHint: 'Trusted-mode user identity sent with requests. Leave blank unless your server uses trusted mode.',
   peerId: 'Actor peer id',
-  peerIdHint: 'Explicit peer; defaults to one derived from the session workspace.',
+  peerIdHint: 'Explicit actor peer. Leave blank to derive one from each session workspace automatically.',
   behavior: 'Recall',
   workspacePeer: 'Derive an actor peer from the session workspace',
+  workspacePeerHint: 'On: each DSH session maps to the peer derived from its workspace automatically. Off: only the explicit peer above is used.',
   recallPeerScope: 'Recall peer scope',
   recallPeerScopeAll: 'all (cross-workspace recall)',
   recallPeerScopeActor: 'actor (isolate to this peer)',
+  recallPeerScopeHint: 'all: recall across every workspace peer. actor: recall only the current session peer\u2019s memories.',
   recallLimit: 'Max recalled items',
+  recallLimitHint: 'Max recalled items per pre-step block (1\u201350, default 10).',
   recallTokenBudget: 'Recall token budget',
+  recallTokenBudgetHint: 'Token budget per recall block (200\u201350000, default 2000). Higher = richer context, more tokens.',
   scoreThreshold: 'Score threshold',
+  scoreThresholdHint: 'Minimum relevance score for a recall hit (0\u20131, default 0.35). Lower = more results but more noise.',
   commitTokenThreshold: 'Commit token threshold',
+  commitTokenThresholdHint: 'Pending-token volume that triggers an automatic memory commit at turn end (1000\u20131000000, default 20000).',
+  injectProfile: 'Inject user profile each session',
+  injectProfileHint: 'Inject the user-profile + <available-memories> block each session; when off, the profile is neither injected nor fetched at startup (dynamic recall is unaffected).',
+  injectSkills: 'Inject OpenViking skills',
+  injectSkillsHint: 'Add skills saved in OpenViking to the DSH skill catalog (provider name openviking).',
   capture: 'Capture',
   captureToolResults: 'Capture tool results into memory',
+  captureToolResultsHint: 'Also capture tool-result messages into memory (default off). Enables richer memory at a higher write cost.',
   captureAssistantTurns: 'Capture assistant turns into memory',
+  captureAssistantTurnsHint: 'Capture assistant replies into memory (default on).',
   syncTurns: 'Capture synchronously per event',
+  syncTurnsHint: 'Capture synchronously on each session/event (default on). Off defers capture until the commit threshold is reached.',
   statusReady: 'connected',
   statusLoading: 'connecting…',
   statusUnavailable: 'unavailable',
@@ -102,29 +162,55 @@ const zh: LocaleDict = {
   externalNotice: '捕获的会话内容与召回查询会发送到所配置的 OpenViking 服务器。',
   connection: '连接',
   endpoint: '服务器端点',
-  endpointHint: 'OpenViking 基础 URL，例如 http://127.0.0.1:1933。',
+  endpointHint: 'OpenViking 服务的基础 URL，例如 http://127.0.0.1:1933（默认）。修改后立即生效。',
+  credential: '凭据名称',
+  credentialHint: '保存 OpenViking API 密钥的 DSH 凭据引用。密钥保存在 DSH 凭据存储中，保存后不会在页面中回显。',
   apiKey: 'API 密钥',
-  apiKeyHint: '保存在设置文档中，所有传输面都会脱敏。',
-  apiKeyPlaceholder: '留空以保留已保存的密钥',
+  apiKeyHint: '密钥会保存到 DSH 凭据存储，保存后不会在页面中回显。',
+  apiKeyPlaceholderMissing: '粘贴 API 密钥',
+  apiKeyPlaceholderConfigured: '已保存；留空表示不修改',
+  apiKeyBlank: 'API 密钥不能只包含空格。',
+  apiKeyInvalid: '请只粘贴密钥本身，不要包含变量名、引号、空格或换行。',
+  apiKeyLocked: '当前密钥来自只读配置，无法在此替换。',
+  credentialConfigured: '已配置',
+  credentialMissing: '未配置',
+  sourceHint: '当前来源：{source}',
+  source: '来源',
+  saveKey: '保存密钥',
+  savingKey: '保存中…',
+  keySaved: '密钥已保存',
   account: '账号',
-  accountHint: '受信模式账号。',
+  accountHint: '受信模式下随请求发送的账号标识。服务器非受信模式时留空即可。',
   user: '用户',
-  userHint: '受信模式用户。',
+  userHint: '受信模式下随请求发送的用户标识。服务器非受信模式时留空即可。',
   peerId: '参与者 peer',
-  peerIdHint: '显式 peer；默认根据会话工作区派生。',
+  peerIdHint: '显式指定参与者 peer。留空则按每个会话的工作区自动推导。',
   behavior: '召回',
   workspacePeer: '根据会话工作区派生参与者 peer',
+  workspacePeerHint: '开启后，每个 DSH 会话自动映射到其工作区推导出的 peer；关闭后仅使用上面填写的显式 peer。',
   recallPeerScope: '召回 peer 范围',
   recallPeerScopeAll: 'all（跨工作区召回）',
   recallPeerScopeActor: 'actor（仅限本 peer）',
+  recallPeerScopeHint: 'all：跨所有工作区召回记忆；actor：仅召回当前会话 peer 的记忆。',
   recallLimit: '最大召回条数',
+  recallLimitHint: '每次召回最多返回的条目数（1–50，默认 10）。',
   recallTokenBudget: '召回 token 预算',
+  recallTokenBudgetHint: '每条召回块的 token 预算（200–50000，默认 2000）。越大上下文越丰富，消耗的 token 也越多。',
   scoreThreshold: '分数阈值',
+  scoreThresholdHint: '召回的最低相关度阈值（0–1，默认 0.35）。越低召回越多，噪声也越多。',
   commitTokenThreshold: '提交 token 阈值',
+  commitTokenThresholdHint: '触发自动写入记忆的待处理 token 量（1000–1000000，默认 20000）。会话捕获积累到该量级时自动提交到记忆。',
+  injectProfile: '注入用户画像',
+  injectProfileHint: '是否在每个会话注入 user-profile + <available-memories> 画像块；关闭后不注入，初始化也不再拉取画像（动态召回不受影响）。',
+  injectSkills: '注入 OpenViking 技能',
+  injectSkillsHint: '将 OpenViking 中保存的技能注入 DSH 技能目录（provider 名 openviking）。',
   capture: '捕获',
   captureToolResults: '将工具结果捕获进记忆',
+  captureToolResultsHint: '是否将工具结果消息捕获进记忆（默认关）。开启后记忆更丰富，但写入量更大。',
   captureAssistantTurns: '将助手回复捕获进记忆',
+  captureAssistantTurnsHint: '是否将助手回复捕获进记忆（默认开）。',
   syncTurns: '逐事件同步捕获',
+  syncTurnsHint: '是否在 session/event 上逐事件同步捕获（默认开）。关闭后延迟到达到提交阈值时才捕获。',
   statusReady: '已连接',
   statusLoading: '连接中…',
   statusUnavailable: '不可用',
@@ -141,25 +227,167 @@ const FIELD_DEFS: Array<{
   options?: Array<{ value: string; labelKey: keyof LocaleDict }>
 }> = [
   { key: 'endpoint', labelKey: 'endpoint', hintKey: 'endpointHint', type: 'text', kind: 'input' },
-  { key: 'apiKey', labelKey: 'apiKey', hintKey: 'apiKeyHint', type: 'text', kind: 'input' },
   { key: 'account', labelKey: 'account', hintKey: 'accountHint', type: 'text', kind: 'input' },
   { key: 'user', labelKey: 'user', hintKey: 'userHint', type: 'text', kind: 'input' },
   { key: 'peerId', labelKey: 'peerId', hintKey: 'peerIdHint', type: 'text', kind: 'input' },
-  { key: 'workspacePeer', labelKey: 'workspacePeer', hintKey: 'workspacePeer', type: 'text', kind: 'checkbox' },
-  { key: 'recallPeerScope', labelKey: 'recallPeerScope', hintKey: 'recallPeerScope', type: 'text', kind: 'select', options: [
+  { key: 'workspacePeer', labelKey: 'workspacePeer', hintKey: 'workspacePeerHint', type: 'text', kind: 'checkbox' },
+  { key: 'recallPeerScope', labelKey: 'recallPeerScope', hintKey: 'recallPeerScopeHint', type: 'text', kind: 'select', options: [
     { value: 'all', labelKey: 'recallPeerScopeAll' },
     { value: 'actor', labelKey: 'recallPeerScopeActor' },
   ] },
-  { key: 'recallLimit', labelKey: 'recallLimit', hintKey: 'recallLimit', type: 'number', kind: 'input' },
-  { key: 'recallTokenBudget', labelKey: 'recallTokenBudget', hintKey: 'recallTokenBudget', type: 'number', kind: 'input' },
-  { key: 'scoreThreshold', labelKey: 'scoreThreshold', hintKey: 'scoreThreshold', type: 'number', kind: 'input' },
-  { key: 'commitTokenThreshold', labelKey: 'commitTokenThreshold', hintKey: 'commitTokenThreshold', type: 'number', kind: 'input' },
-  { key: 'captureToolResults', labelKey: 'captureToolResults', hintKey: 'captureToolResults', type: 'text', kind: 'checkbox' },
-  { key: 'captureAssistantTurns', labelKey: 'captureAssistantTurns', hintKey: 'captureAssistantTurns', type: 'text', kind: 'checkbox' },
-  { key: 'syncTurns', labelKey: 'syncTurns', hintKey: 'syncTurns', type: 'text', kind: 'checkbox' },
+  { key: 'recallLimit', labelKey: 'recallLimit', hintKey: 'recallLimitHint', type: 'number', kind: 'input' },
+  { key: 'recallTokenBudget', labelKey: 'recallTokenBudget', hintKey: 'recallTokenBudgetHint', type: 'number', kind: 'input' },
+  { key: 'scoreThreshold', labelKey: 'scoreThreshold', hintKey: 'scoreThresholdHint', type: 'number', kind: 'input' },
+  { key: 'commitTokenThreshold', labelKey: 'commitTokenThreshold', hintKey: 'commitTokenThresholdHint', type: 'number', kind: 'input' },
+  { key: 'injectProfile', labelKey: 'injectProfile', hintKey: 'injectProfileHint', type: 'text', kind: 'checkbox' },
+  { key: 'injectSkills', labelKey: 'injectSkills', hintKey: 'injectSkillsHint', type: 'text', kind: 'checkbox' },
+  { key: 'captureToolResults', labelKey: 'captureToolResults', hintKey: 'captureToolResultsHint', type: 'text', kind: 'checkbox' },
+  { key: 'captureAssistantTurns', labelKey: 'captureAssistantTurns', hintKey: 'captureAssistantTurnsHint', type: 'text', kind: 'checkbox' },
+  { key: 'syncTurns', labelKey: 'syncTurns', hintKey: 'syncTurnsHint', type: 'text', kind: 'checkbox' },
 ]
 
 type SettingsValue = Record<string, unknown>
+
+interface CredentialSnapshot {
+  status: 'idle' | 'loading' | 'ready' | 'error'
+  ref: string
+  configured: boolean
+  source?: string
+  writable: boolean
+  /** Settings-document revision the last route snapshot was read at. */
+  revision: number
+  error?: string | undefined
+  saved: boolean
+}
+
+/** Small external store that reads the credential status route. */
+class CredentialController {
+  private state: CredentialSnapshot = {
+    status: 'idle',
+    ref: '',
+    configured: false,
+    writable: false,
+    revision: -1,
+    saved: false,
+  }
+  private listeners = new Set<() => void>()
+  private generation = 0
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  snapshot = (): CredentialSnapshot => this.state
+
+  private set(next: CredentialSnapshot): void {
+    this.state = next
+    for (const listener of this.listeners) listener()
+  }
+
+  async load(): Promise<void> {
+    const generation = ++this.generation
+    if (this.state.status !== 'ready') {
+      this.set({ ...this.state, status: 'loading', ...(this.state.error === undefined ? {} : { error: undefined }) })
+    }
+    try {
+      const snapshot = await fetchSnapshot()
+      if (generation !== this.generation) return
+      this.set({
+        status: 'ready',
+        ref: snapshot.credential.ref,
+        configured: snapshot.credential.configured,
+        ...(snapshot.credential.source === undefined ? {} : { source: snapshot.credential.source }),
+        writable: snapshot.credential.writable,
+        revision: snapshot.settings.revision,
+        saved: false,
+      })
+    } catch (error) {
+      if (generation !== this.generation) return
+      this.set({ ...this.state, status: 'error', error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  async save(value: string): Promise<boolean> {
+    this.set({
+      ...this.state,
+      status: 'loading',
+      saved: false,
+      ...(this.state.error === undefined ? {} : { error: undefined }),
+    })
+    try {
+      const snapshot = await fetchSnapshot({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'credential',
+          expectedRevision: this.state.revision,
+          ref: this.state.ref,
+          value,
+        }),
+      })
+      this.set({
+        status: 'ready',
+        ref: snapshot.credential.ref,
+        configured: snapshot.credential.configured,
+        ...(snapshot.credential.source === undefined ? {} : { source: snapshot.credential.source }),
+        writable: snapshot.credential.writable,
+        revision: snapshot.settings.revision,
+        saved: true,
+      })
+      return true
+    } catch (error) {
+      this.set({ ...this.state, status: 'ready', error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
+  }
+
+  /** Surface a client-side validation failure without losing the last snapshot. */
+  setForError(error: string): void {
+    this.set({ ...this.state, status: 'ready', error })
+  }
+
+  /** Clear a transient error once the input changes. */
+  clearError(): void {
+    if (this.state.error !== undefined) this.set({ ...this.state, error: undefined })
+  }
+}
+
+interface SettingsRouteSnapshot {
+  schemaVersion: 1
+  writable: boolean
+  settings: {
+    value: SettingsValue
+    user?: unknown
+    base?: unknown
+    revision: number
+    applies: 'live'
+  }
+  credential: {
+    ref: string
+    configured: boolean
+    source?: string
+    writable: boolean
+  }
+}
+
+interface ApiSuccess<T> { ok: true, value: T }
+interface ApiFailure { ok: false, error: { code: string, message: string } }
+
+async function fetchSnapshot(init?: RequestInit): Promise<SettingsRouteSnapshot> {
+  const response = await fetch(SETTINGS_ROUTE, { credentials: 'same-origin', ...init })
+  const body = await response.json() as ApiSuccess<SettingsRouteSnapshot> | ApiFailure
+  if (!response.ok || !body.ok) {
+    const failure = body as ApiFailure
+    throw new Error(failure.error?.message ?? `OpenViking Settings request failed with HTTP ${response.status}`)
+  }
+  return body.value
+}
+
+function sourceLabel(source: string): string {
+  const labels: Record<string, string> = { env: 'env', file: 'file', 'project-env': 'project-env', 'user-env': 'user-env' }
+  return labels[source] ?? source
+}
 
 function SettingsSection({ scope, t }: { scope: SettingsScope<SettingsValue>, t: (key: keyof LocaleDict) => string }) {
   const snapshot = useSyncExternalStore(
@@ -192,7 +420,13 @@ function SettingsSection({ scope, t }: { scope: SettingsScope<SettingsValue>, t:
       {!writable && <p style={{ margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-warn-label)' }}>{t('readOnly')}</p>}
 
       <FieldGroup label={t('connection')}>
-        {FIELD_DEFS.filter(f => ['endpoint', 'apiKey', 'account', 'user', 'peerId'].includes(f.key))
+        <CredentialField
+          t={t}
+          settingsWritable={writable}
+          settingsRevision={snapshot.revision}
+          credentialRef={typeof value?.credential === 'string' ? value.credential : ''}
+        />
+        {FIELD_DEFS.filter(f => ['endpoint', 'account', 'user', 'peerId'].includes(f.key))
           .map(f => (
             <InputField
               key={f.key}
@@ -200,14 +434,13 @@ function SettingsSection({ scope, t }: { scope: SettingsScope<SettingsValue>, t:
               value={value?.[f.key]}
               writable={writable}
               t={t}
-              apiKeySaved={Boolean(value?.apiKey)}
               onCommit={(next) => write(f.key, next)}
             />
           ))}
       </FieldGroup>
 
       <FieldGroup label={t('behavior')}>
-        {FIELD_DEFS.filter(f => ['workspacePeer', 'recallPeerScope', 'recallLimit', 'recallTokenBudget', 'scoreThreshold', 'commitTokenThreshold'].includes(f.key))
+        {FIELD_DEFS.filter(f => ['workspacePeer', 'recallPeerScope', 'recallLimit', 'recallTokenBudget', 'scoreThreshold', 'commitTokenThreshold', 'injectProfile', 'injectSkills'].includes(f.key))
           .map(f => (
             f.kind === 'checkbox' ? (
               <CheckField key={f.key} field={f} checked={Boolean(value?.[f.key])} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
@@ -225,6 +458,107 @@ function SettingsSection({ scope, t }: { scope: SettingsScope<SettingsValue>, t:
             <CheckField key={f.key} field={f} checked={Boolean(value?.[f.key])} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
           ))}
       </FieldGroup>
+    </div>
+  )
+}
+
+function CredentialField({ t, settingsWritable, settingsRevision, credentialRef }: {
+  t: (key: keyof LocaleDict) => string
+  settingsWritable: boolean
+  settingsRevision: number | undefined
+  credentialRef: string
+}) {
+  const [controller] = useState(() => new CredentialController())
+  const credential = useSyncExternalStore(
+    controller.subscribe,
+    controller.snapshot,
+    controller.snapshot,
+  )
+  const [apiKey, setApiKey] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  // Load the credential status when mounted and whenever the settings
+  // document moves (the credential reference may have changed).
+  useEffect(() => {
+    void controller.load()
+  }, [controller, settingsRevision])
+
+  const configured = credential.status === 'ready' && credential.configured
+  const locked = !credential.writable
+  const keyValid = apiKey.trim().length > 0
+  const canSave = settingsWritable && keyValid && !locked && !busy && credential.status === 'ready'
+
+  const save = async (): Promise<void> => {
+    const trimmed = apiKey.trim()
+    if (trimmed.length === 0) {
+      controller.setForError(t('apiKeyBlank'))
+      return
+    }
+    const first = trimmed[0] ?? ''
+    const quoted = trimmed.length > 1 && (first === '"' || first === '\'' || first === '`') && trimmed.endsWith(first)
+    const environmentLine = /^[A-Z][A-Z0-9_]*=[^=]/u.test(trimmed)
+    if (quoted || environmentLine || !/^[\x21-\x7E]+$/u.test(trimmed)) {
+      controller.setForError(t('apiKeyInvalid'))
+      return
+    }
+    setBusy(true)
+    const ok = await controller.save(trimmed)
+    setBusy(false)
+    if (ok) setApiKey('')
+  }
+
+  const badgeTone = configured
+    ? 'var(--dsw-alias-state-success-primary)'
+    : credential.status === 'ready'
+      ? 'var(--dsw-alias-state-error-primary)'
+      : 'var(--dsw-alias-state-warn-primary)'
+  const badgeLabel = configured
+    ? t('credentialConfigured')
+    : credential.status === 'ready'
+      ? t('credentialMissing')
+      : t('statusLoading')
+
+  const hint = locked
+    ? t('apiKeyLocked')
+    : credential.source === undefined
+      ? t('apiKeyHint')
+      : `${t('apiKeyHint')} ${t('sourceHint').replace('{source}', sourceLabel(credential.source))}`
+
+  return (
+    <div style={{ display: 'grid', gap: 6, alignContent: 'start' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11, fontWeight: 600 }}>{t('apiKey')}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'var(--dsw-alias-label-secondary)' }}>
+          <Pill><i style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: badgeTone }} /> {badgeLabel}</Pill>
+        </span>
+      </div>
+      <label style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' }}>{t('credential')}: <code style={{ fontSize: 10 }}>{credentialRef || '—'}</code></span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Input
+            type="password"
+            autoComplete="new-password"
+            aria-label={t('apiKey')}
+            disabled={!settingsWritable || locked || busy}
+            placeholder={configured ? t('apiKeyPlaceholderConfigured') : t('apiKeyPlaceholderMissing')}
+            value={apiKey}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => {
+              setApiKey(event.target.value)
+              if (credential.error) controller.clearError()
+            }}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Button variant="primary" disabled={!canSave} onClick={() => { void save() }}>
+            {busy ? t('savingKey') : t('saveKey')}
+          </Button>
+        </div>
+      </label>
+      <small style={{ fontSize: 11, color: credential.error ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>
+        {credential.error ?? hint}
+      </small>
+      {credential.status === 'ready' && credential.saved ? (
+        <small style={{ fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' }}>{t('keySaved')}</small>
+      ) : null}
     </div>
   )
 }
@@ -249,32 +583,29 @@ function FieldGroup({ label, children }: { label: string, children: ReactNode })
   )
 }
 
-function InputField({ field, value, writable, t, apiKeySaved = false, onCommit }: {
+function InputField({ field, value, writable, t, onCommit }: {
   field: (typeof FIELD_DEFS)[number]
   value: unknown
   writable: boolean
   t: (key: keyof LocaleDict) => string
-  apiKeySaved?: boolean
   onCommit: (value: unknown) => void
 }) {
   const text = typeof value === 'string' ? value : ''
   const numberValue = typeof value === 'number' ? value : ''
   const raw = field.type === 'number' ? numberValue : text
-  const placeholder = field.key === 'apiKey' && apiKeySaved ? t('apiKeyPlaceholder') : undefined
   return (
     <label style={{ display: 'grid', gap: 6, alignContent: 'start' }}>
       <span style={{ fontSize: 11, fontWeight: 600 }}>{t(field.labelKey)}</span>
       <Input
-        type={field.key === 'apiKey' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+        type={field.type === 'number' ? 'number' : 'text'}
         value={raw}
-        placeholder={placeholder}
         disabled={!writable}
         onChange={(e: ChangeEvent<HTMLInputElement>) => {
           const next = field.type === 'number' ? Number(e.target.value) : e.target.value
-          onCommit(field.key === 'apiKey' && e.target.value === '' && apiKeySaved ? '' : next)
+          onCommit(next)
         }}
       />
-      <small style={{ fontSize: 10, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.4 }}>{t(field.hintKey)}</small>
+      <small style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>{t(field.hintKey)}</small>
     </label>
   )
 }
@@ -293,7 +624,7 @@ function CheckField({ field, checked, writable, t, onCommit }: {
           onChange={(e: ChangeEvent<HTMLInputElement>) => onCommit(e.target.checked)} />
         {t(field.labelKey)}
       </span>
-      <small style={{ fontSize: 10, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.4, marginLeft: 20 }}>{t(field.hintKey)}</small>
+      <small style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5, marginLeft: 20 }}>{t(field.hintKey)}</small>
     </label>
   )
 }
@@ -315,7 +646,7 @@ function SelectField({ field, value, writable, t, onCommit }: {
           <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
         ))}
       </select>
-      <small style={{ fontSize: 10, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.4 }}>{t(field.hintKey)}</small>
+      <small style={{ fontSize: 11, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>{t(field.hintKey)}</small>
     </label>
   )
 }

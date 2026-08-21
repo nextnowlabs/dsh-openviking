@@ -127,12 +127,25 @@ export interface SkillScopeOptions {
   timeoutMs?: number
 }
 
+/** Client construction options. */
+export interface OpenVikingClientOptions {
+  /**
+   * Resolve the current Bearer API key from the DSH credential store. Called
+   * once per request (the credential seam contract: re-resolve per operation,
+   * never cache across operations), so a changed credential reaches the next
+   * request without any plugin restart. Omit to send requests without a key.
+   */
+  resolveApiKey?: () => Promise<string | undefined>
+}
+
 export class OpenVikingClient {
   connected = false
   config: OpenVikingConfig
+  private readonly resolveApiKey?: () => Promise<string | undefined>
 
-  constructor(config: OpenVikingConfig) {
+  constructor(config: OpenVikingConfig, options: OpenVikingClientOptions = {}) {
     this.config = config
+    this.resolveApiKey = options.resolveApiKey
   }
 
   /**
@@ -145,9 +158,9 @@ export class OpenVikingClient {
     this.config = config
   }
 
-  headers(options: FetchOptions = {}): Record<string, string> {
+  headers(options: FetchOptions & { apiKey?: string } = {}): Record<string, string> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`
+    if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`
     if (this.config.account) headers['X-OpenViking-Account'] = this.config.account
     if (this.config.user) headers['X-OpenViking-User'] = this.config.user
     // The actor-peer header selects ONE peer collection for retrieval. Only
@@ -174,11 +187,15 @@ export class OpenVikingClient {
     const timeoutMs = options.timeoutMs ?? this.config.requestTimeoutMs
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
+    // Resolve the Bearer key once per request from the DSH credential store:
+    // a changed credential reaches the next request without a restart, and the
+    // key never rides the settings document or the plugin config.
+    const apiKey = await this.resolveApiKey?.() ?? ''
     try {
       const response = await fetch(`${this.config.endpoint}${path}`, {
         ...init,
         headers: {
-          ...this.headers(options),
+          ...this.headers({ ...options, apiKey }),
           ...(init.headers as Record<string, string> | undefined),
         },
         signal: controller.signal,

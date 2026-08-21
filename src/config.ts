@@ -4,14 +4,17 @@
  * The `openviking` settings namespace carries connection identity, recall and
  * capture tuning, and commit behavior. Configuration comes ONLY from the
  * settings document (plus built-in defaults): `OPENVIKING_*` environment
- * variables and `~/.openviking` config files are never consulted. Secrets never
- * live in source — the API key is stored in the settings document (redacted on
- * every wire surface).
+ * variables and `~/.openviking` config files are never consulted. Secrets
+ * never live in source or in the settings document — `credential` is a DSH
+ * Credential reference (an environment-style name) resolved per request
+ * through `ctx.credentials`; the value itself is owned by the DSH credential
+ * store.
  * @module openviking-memory/config
  */
 
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
+import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { buildUserAgent } from './shared/credentials.ts'
 import { resolveEffectivePeerId } from './shared/workspace-peer.ts'
@@ -23,12 +26,15 @@ export const OPENVIKING_SETTINGS_NAMESPACE: SettingsNamespace = settingsNamespac
 /** Default OpenViking server endpoint. */
 export const DEFAULT_OPENVIKING_ENDPOINT = 'http://127.0.0.1:1933'
 
+/** Default DSH Credential reference holding the OpenViking API key. */
+export const DEFAULT_OPENVIKING_CREDENTIAL = 'OPENVIKING_API_KEY'
+
 /** User-settable fields surfaced by the settings schema. */
 export interface OpenVikingSettings {
   /** OpenViking server base URL. */
   endpoint: string
-  /** Bearer credential (stored in the settings document). */
-  apiKey: string
+  /** DSH Credential reference holding the Bearer API key (an environment-style name). */
+  credential: string
   /** Trusted-mode account. */
   account: string
   /** Trusted-mode user. */
@@ -82,7 +88,9 @@ export interface OpenVikingSettings {
 }
 
 /** Fully resolved configuration consumed by the runtime. */
-export type OpenVikingConfig = OpenVikingSettings & {
+export type OpenVikingConfig = Omit<OpenVikingSettings, 'credential'> & {
+  /** Validated DSH Credential reference holding the Bearer API key. */
+  credential: CredentialRef
   /** Effective actor peer after workspace/explicit resolution. */
   resolvedPeerId?: string
   /** Explicit peer provided by the user (empty when none). */
@@ -98,7 +106,7 @@ export type OpenVikingConfig = OpenVikingSettings & {
 /** Settings schema with documented defaults. */
 export const Config: Schema<OpenVikingSettings> = z.object({
   endpoint: z.string().default(DEFAULT_OPENVIKING_ENDPOINT),
-  apiKey: z.string().role('secret').default(''),
+  credential: z.string().default(DEFAULT_OPENVIKING_CREDENTIAL),
   account: z.string().default(''),
   user: z.string().default(''),
   peerId: z.string().default(''),
@@ -150,11 +158,20 @@ export function resolveConfig(
   cwd: string = process.cwd(),
 ): OpenVikingConfig {
   const explicitPeerId = String(input.peerId || '').trim()
+  let credential: CredentialRef
+  try {
+    credential = credentialRef(String(input.credential || DEFAULT_OPENVIKING_CREDENTIAL).trim())
+  } catch (error) {
+    throw new TypeError(
+      `openviking credential "${input.credential || DEFAULT_OPENVIKING_CREDENTIAL}" is not a valid credential reference`,
+      { cause: error },
+    )
+  }
   const config: OpenVikingConfig = {
     ...defaults(),
     ...input,
     endpoint: String(input.endpoint || DEFAULT_OPENVIKING_ENDPOINT),
-    apiKey: String(input.apiKey || ''),
+    credential,
     account: String(input.account || ''),
     user: String(input.user || ''),
     peerId: explicitPeerId,
@@ -193,7 +210,7 @@ export function resolveConfig(
 function defaults(): OpenVikingConfig {
   return {
     endpoint: DEFAULT_OPENVIKING_ENDPOINT,
-    apiKey: '',
+    credential: credentialRef(DEFAULT_OPENVIKING_CREDENTIAL),
     account: '',
     user: '',
     peerId: '',

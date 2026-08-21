@@ -52,7 +52,7 @@ OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设
 | 字段 | 界面 | 默认值 | 用途 |
 | --- | :-: | --- | --- |
 | 服务器端点 `endpoint` | ✓ | `http://127.0.0.1:1933` | OpenViking 服务器基础 URL |
-| API 密钥 `apiKey` | ✓ | *(空)* | Bearer 凭据；以脱敏形式存储在设置文档中 |
+| 凭据引用 `credential` | ✓ | `OPENVIKING_API_KEY` | 保存 Bearer API 密钥的 DSH 凭据引用（环境风格名称）；密钥本体存储在 DSH 凭据存储中，不在设置文档内 |
 | 账号 `account` | ✓ | *(空)* | 受信模式账号 |
 | 用户 `user` | ✓ | *(空)* | 受信模式用户 |
 | Actor 对等节点 ID `peerId` | ✓ | *(空)* | 显式对等节点；留空则按会话工作区推导 |
@@ -113,6 +113,7 @@ OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设
 
 ## 行为说明
 
+- **API 密钥存放在 DSH 凭据存储**：设置文档与插件配置只携带 `credential` 引用（默认 `OPENVIKING_API_KEY`）。每个 OpenViking 请求在发出前经 `ctx.credentials.resolve(credential)` 解析密钥并以 `Authorization: Bearer` 发送，因此凭据变更在下一个请求即生效，无需重启；设置界面通过 `/_dsh/openviking/settings` 同源路由写入新密钥，浏览器永不见其明文。
 - `agent/session-start` 通过 `agent.inject()` 注入 OpenViking 画像与可用记忆索引（`injectProfile` 关闭时不注入，且初始化不再拉取画像）。
 - `agent/pre-step` 使用当前步骤的输入进行检索，并将一条持久化、带来源标注的用户消息追加到同一步骤。画像与召回上下文以会话事件进入，可重放、对压缩可见且不会进入请求头。
 - 画像与召回在 `agent/pre-step` 中**并行构建**，并受 `recallTimeoutMs` 硬性截止时间约束：慢/远端服务器超时后该步直接跳过召回（或画像），绝不阻塞模型步；画像构建在基础链路之前启动，与系统提示词装配重叠。

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { OpenVikingClient } from '../src/ov-client.ts'
+import { OpenVikingClient, type OpenVikingClientOptions } from '../src/ov-client.ts'
 import { resolveConfig } from '../src/config.ts'
 
 const originalFetch = globalThis.fetch
@@ -8,10 +8,10 @@ afterEach(() => {
   globalThis.fetch = originalFetch
 })
 
-function clientWith(overrides: Record<string, unknown>) {
+function clientWith(overrides: Record<string, unknown>, options: OpenVikingClientOptions = {}) {
   const config = resolveConfig({
     endpoint: 'http://127.0.0.1:1933',
-    apiKey: '',
+    credential: 'OPENVIKING_API_KEY',
     account: '',
     user: '',
     peerId: '',
@@ -19,7 +19,7 @@ function clientWith(overrides: Record<string, unknown>) {
     recallLimit: 10,
     ...overrides,
   })
-  return new OpenVikingClient(config)
+  return new OpenVikingClient(config, options)
 }
 
 describe('OpenVikingClient', () => {
@@ -37,13 +37,14 @@ describe('OpenVikingClient', () => {
     }
 
     const client = clientWith({
-      apiKey: 'secret',
       account: 'account-a',
       user: 'user-a',
       peerId: 'peer-a',
       requestTimeoutMs: 1000,
       commitKeepRecentCount: 10,
       recallPeerScope: 'actor',
+    }, {
+      resolveApiKey: async () => 'secret',
     })
     const response = await client.commitSession('dsh-1')
 
@@ -54,6 +55,46 @@ describe('OpenVikingClient', () => {
     expect(seen.init.headers!['X-OpenViking-Account']).toBe('account-a')
     expect(seen.init.headers!['X-OpenViking-User']).toBe('user-a')
     expect(seen.init.headers!['X-OpenViking-Actor-Peer']).toBe('peer-a')
+  })
+
+  it('resolves the Bearer key once per request from the credential store', async () => {
+    const authorizations: Array<string | undefined> = []
+    globalThis.fetch = async (_url, init) => {
+      authorizations.push((init as RequestInit).headers as never)
+      return new Response(JSON.stringify({ status: 'ok', result: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    let key = 'key-one'
+    const client = clientWith({}, {
+      resolveApiKey: async () => key,
+    })
+
+    await client.ensureSession('dsh-a')
+    key = 'key-two'
+    await client.ensureSession('dsh-b')
+
+    expect(authorizations).toHaveLength(2)
+    expect((authorizations[0] as Record<string, string>)['Authorization']).toBe('Bearer key-one')
+    expect((authorizations[1] as Record<string, string>)['Authorization']).toBe('Bearer key-two')
+  })
+
+  it('omits Authorization when the credential store has no key', async () => {
+    let headers: Record<string, string>
+    globalThis.fetch = async (_url, init) => {
+      headers = (init as RequestInit).headers as Record<string, string>
+      return new Response(JSON.stringify({ status: 'ok', result: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({}, {
+      resolveApiKey: async () => undefined,
+    })
+
+    await client.ensureSession('dsh-nokey')
+    expect(headers['Authorization']).toBeUndefined()
   })
 
   it('lets a per-session actor peer override the process default', async () => {
@@ -114,10 +155,12 @@ describe('OpenVikingClient', () => {
         headers: { 'Content-Type': 'application/json' },
       })
     }
-    const client = clientWith({})
+    const client = clientWith({}, {
+      resolveApiKey: async () => 'new-key',
+    })
     client.reconfigure(resolveConfig({
       endpoint: 'https://api.vikingdb.cn-beijing.volces.com/openviking',
-      apiKey: 'new-key',
+      credential: 'OPENVIKING_NEW_KEY',
       account: '',
       user: '',
       peerId: '',
