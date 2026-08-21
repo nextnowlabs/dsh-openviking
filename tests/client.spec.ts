@@ -43,6 +43,7 @@ describe('OpenVikingClient', () => {
       peerId: 'peer-a',
       requestTimeoutMs: 1000,
       commitKeepRecentCount: 10,
+      recallPeerScope: 'actor',
     })
     const response = await client.commitSession('dsh-1')
 
@@ -64,10 +65,28 @@ describe('OpenVikingClient', () => {
         headers: { 'Content-Type': 'application/json' },
       })
     }
-    const client = clientWith({ peerId: 'process-peer' })
+    const client = clientWith({ peerId: 'process-peer', recallPeerScope: 'actor' })
 
     await client.ensureSession('dsh-2', 'workspace-peer')
     expect(headers['X-OpenViking-Actor-Peer']).toBe('workspace-peer')
+  })
+
+  it('does not filter retrieval by the actor peer in default (all) recall scope', async () => {
+    // recallPeerScope 'all' (the default) must search the whole user context:
+    // sending X-OpenViking-Actor-Peer would filter OpenViking to one peer
+    // collection and hide memories/resources outside the workspace peer.
+    let headers: Record<string, string> = {}
+    globalThis.fetch = async (_url, init) => {
+      headers = (init as RequestInit).headers as Record<string, string>
+      return new Response(JSON.stringify({ status: 'ok', result: {} }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({ peerId: 'process-peer' })
+
+    await client.ensureSession('dsh-3', 'workspace-peer')
+    expect(headers['X-OpenViking-Actor-Peer']).toBeUndefined()
   })
 
   it('reuses existing OpenViking sessions on DSH resume', async () => {

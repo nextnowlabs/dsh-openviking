@@ -137,8 +137,17 @@ export class OpenVikingClient {
     if (this.config.apiKey) headers.Authorization = `Bearer ${this.config.apiKey}`
     if (this.config.account) headers['X-OpenViking-Account'] = this.config.account
     if (this.config.user) headers['X-OpenViking-User'] = this.config.user
+    // The actor-peer header selects ONE peer collection for retrieval. Only
+    // send it when peer-scoped recall is configured ('actor'): the default
+    // 'all' recall must search the whole user context (user root + shared
+    // resources) instead of hiding everything outside the workspace peer's
+    // collection — which is what made viking_search/recall return nothing for
+    // memories that exist under viking://user/<user> and viking://resources.
+    // Session-message attribution rides the body `peer_id`, not this header.
     const actorPeerId = options.actorPeerId ?? this.config.resolvedPeerId ?? ''
-    if (actorPeerId) headers['X-OpenViking-Actor-Peer'] = actorPeerId
+    if (this.config.recallPeerScope === 'actor' && actorPeerId) {
+      headers['X-OpenViking-Actor-Peer'] = actorPeerId
+    }
     if (this.config.userAgent) headers['User-Agent'] = this.config.userAgent
     return headers
   }

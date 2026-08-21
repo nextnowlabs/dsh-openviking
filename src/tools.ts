@@ -25,10 +25,10 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
   ctx.tools.register(textTool({
     name: 'viking_search',
     description:
-      'Search OpenViking memories, resources, and skills. Use this for prior decisions, preferences, and project knowledge not present in the current context.',
+      'Semantic search across OpenViking memories, resources, and skills. Use this for prior decisions, preferences, and project knowledge not present in the current context. It searches the current user memory root (viking://user/<space>/memories/), shared resources (viking://resources), and skills (viking://user/<space>/skills/ and viking://agent/skills). Discover the exact layout by listing the root with viking_browse.',
     parameters: {
       query: { type: 'string', required: true, description: 'Semantic search query.' },
-      scope: { type: 'string', description: 'Optional viking:// URI prefix.' },
+      scope: { type: 'string', description: 'Optional viking:// URI prefix to limit the search, e.g. viking://resources or viking://user/default/memories. Omit to search everything.' },
       limit: { type: 'integer', description: 'Maximum results, from 1 to 50.' },
     },
     async execute(args, exec) {
@@ -51,7 +51,7 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
   ctx.tools.register(textTool({
     name: 'viking_read',
     description:
-      'Read OpenViking content by viking:// URI at abstract, overview, or full detail.',
+      'Read OpenViking content by viking:// URI at abstract, overview, or full detail. Valid URIs live under roots such as viking://user/<space>/memories/..., viking://user/<space>/skills/..., viking://resources/..., and viking://agent/skills/....',
     parameters: {
       uri: { type: 'string', required: true, description: 'The viking:// URI to read.' },
       level: {
@@ -75,7 +75,8 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
 
   ctx.tools.register(textTool({
     name: 'viking_browse',
-    description: 'List an OpenViking directory or inspect metadata for a viking:// URI.',
+    description:
+      'List one OpenViking directory (action=list, like ls) or inspect a URI\'s metadata (action=stat). Real roots: viking:// (the root), viking://resources (shared resources), viking://user/<space> (your space, containing memories/, resources/, skills/ subdirectories), viking://agent/skills (account-shared skills). Use viking_tree for a recursive listing instead.',
     parameters: {
       action: {
         type: 'string',
@@ -206,7 +207,7 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
   ctx.tools.register(textTool({
     name: 'viking_tree',
     description:
-      'List the recursive directory tree under an OpenViking URI, optionally limited by depth.',
+      'List the recursive directory tree under an OpenViking URI, optionally limited by depth. Note this tool takes uri/level_limit/node_limit only — it has no action parameter; use viking_browse (action=list) for a single directory listing. Defaults to the root viking://.',
     parameters: {
       uri: { type: 'string', description: 'URI to tree. Defaults to the OpenViking root.' },
       level_limit: { type: 'integer', description: 'Maximum depth to traverse, from 1 to 10.' },
@@ -283,7 +284,7 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
   ctx.tools.register(textTool({
     name: 'viking_grep',
     description:
-      'Search file contents under an OpenViking URI with a regex pattern. Use for exact text matching; viking_search is for semantic retrieval.',
+      'Search file contents under an OpenViking URI with a regex pattern. Use for exact text matching; viking_search is for semantic retrieval. Defaults to the root viking://; valid scopes include viking://resources and viking://user/<space>/memories.',
     parameters: {
       pattern: { type: 'string', required: true, description: 'Regular expression to search for.' },
       uri: { type: 'string', description: 'URI prefix to search. Defaults to the OpenViking root.' },
@@ -313,7 +314,7 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
   ctx.tools.register(textTool({
     name: 'viking_glob',
     description:
-      'Find OpenViking files matching a glob pattern (e.g. **/*.md). Use for filename matching; viking_search is for content-based retrieval.',
+      'Find OpenViking files matching a glob pattern (e.g. **/*.md). Use for filename matching; viking_search is for content-based retrieval. Defaults to the root viking://; valid scopes include viking://resources and viking://user/<space>/memories.',
     parameters: {
       pattern: { type: 'string', required: true, description: 'Glob pattern such as **/*.md.' },
       uri: { type: 'string', description: 'Root URI to search. Defaults to the OpenViking root.' },
