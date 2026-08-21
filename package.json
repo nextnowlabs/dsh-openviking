@@ -1,6 +1,6 @@
 {
   "name": "@nextnowlabs/dsh-openviking",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "OpenViking memory and context bundle for DeepSeek Harness：自动召回、会话捕获、viking:// 保护与记忆工具，可在 DSH 设置中配置。",
   "keywords": [
     "deepseek-harness",
