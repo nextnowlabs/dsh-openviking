@@ -1,13 +1,25 @@
 /**
- * DSH Ark-free OpenViking browser plugin: the OpenViking settings section.
+ * DSH Ark-free OpenViking browser plugin: the OpenViking configuration card
+ * inside the Plugins settings section's configurable tab.
  *
- * Binds the `openviking` settings namespace through `ctx.settingsScope` and
- * renders connection identity plus recall/capture tuning, writing each field
- * through the namespace's revision-fenced `set` path. The API key is NOT a
- * settings field: it lives in the DSH credential store under the configured
- * `credential` reference, read and written through the same-origin
- * `/_dsh/openviking/settings` route (see `src/web.ts`); the browser only ever
- * sees whether the credential is configured and where it comes from.
+ * The configuration used to be its own top-level Settings page
+ * (`settings.section`); it now registers a `settings.plugin.item` entry, so it
+ * appears under 设置 → 插件 (Settings → Plugins) in the "Plugin configuration"
+ * tab as a card alongside the other configurable plugins, without adding a
+ * tab of its own. The card binds the `openviking` settings namespace through
+ * `ctx.settingsScope` and renders connection identity plus recall/capture
+ * tuning, writing each field through the namespace's revision-fenced `set`
+ * path. The API key is NOT a settings field: it lives in the DSH credential
+ * store under the configured `credential` reference, read and written through
+ * the same-origin `/_dsh/openviking/settings` route (see `src/web.ts`); the
+ * browser only ever sees whether the credential is configured and where it
+ * comes from.
+ *
+ * The card chrome is drawn here rather than reused from
+ * `@deepseek-ai/dsh-client-ui-settings-plugins`: that package's client entry
+ * exports types only, so an external plugin cannot import its render values
+ * (PluginCard, fields, CardForm) without the bundle depending on the package
+ * at runtime.
  */
 
 import {
@@ -17,20 +29,19 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from 'react'
-import { Button, Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronDownOutline14, Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 
 const NS = 'openviking'
-const NAV_LABEL = 'OpenViking'
-const NAV_LABEL_ZH = 'OpenViking 记忆'
 /** Keep in sync with `OPENVIKING_SETTINGS_ROUTE` in `src/web.ts`. */
 const SETTINGS_ROUTE = '/_dsh/openviking/settings'
 
 type LocaleDict = {
-  nav: string
+  collapse: string
+  expand: string
   settingsTitle: string
   settingsIntro: string
   externalNotice: string
@@ -93,7 +104,8 @@ type LocaleDict = {
 }
 
 const en: LocaleDict = {
-  nav: NAV_LABEL,
+  collapse: 'Collapse',
+  expand: 'Expand',
   settingsTitle: 'OpenViking Memory',
   settingsIntro: 'Connect DeepSeek Harness to an OpenViking server for auto-recall, session capture, and memory tools.',
   externalNotice: 'Captured session content and recall queries are sent to the configured OpenViking server.',
@@ -156,7 +168,8 @@ const en: LocaleDict = {
 }
 
 const zh: LocaleDict = {
-  nav: NAV_LABEL_ZH,
+  collapse: '收起',
+  expand: '展开',
   settingsTitle: 'OpenViking 记忆',
   settingsIntro: '将 DeepSeek Harness 连接到 OpenViking 服务器，实现自动召回、会话捕获与记忆工具。',
   externalNotice: '捕获的会话内容与召回查询会发送到所配置的 OpenViking 服务器。',
@@ -389,76 +402,113 @@ function sourceLabel(source: string): string {
   return labels[source] ?? source
 }
 
-function SettingsSection({ scope, t }: { scope: SettingsScope<SettingsValue>, t: (key: keyof LocaleDict) => string }) {
+function OpenVikingCard({ scope, t }: { scope: SettingsScope<SettingsValue>, t: (key: keyof LocaleDict) => string }) {
   const snapshot = useSyncExternalStore(
     (listener) => scope.subscribe(listener),
     () => scope.getSnapshot(),
     () => scope.getSnapshot(),
   )
+  const [open, setOpen] = useState(false)
   const value = snapshot.value as SettingsValue | undefined
   const writable = snapshot.writable && snapshot.status === 'ready'
+  // A deployment that does not expose the openviking namespace shows no card
+  // at all — the same availability rule the other plugin cards follow.
+  if (snapshot.status !== 'ready') return null
 
   const write = (field: string, next: unknown): void => {
     if (!writable) return
     void scope.set(field, next)
   }
 
+  const title = t('settingsTitle')
+
   return (
-    <div style={{ display: 'grid', gap: 16, maxWidth: 860, padding: '8px 2px 32px', color: 'var(--dsw-alias-label-primary)' }}>
-      <div style={{ display: 'grid', gap: 4 }}>
-        <span style={{ fontSize: 25, fontWeight: 700, letterSpacing: '-.025em' }}>{t('settingsTitle')}</span>
-        <p style={{ margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: 13, lineHeight: 1.55, maxWidth: 640 }}>
-          {t('settingsIntro')}
-        </p>
-        <p style={{ margin: '4px 0 0', color: 'var(--dsw-alias-label-secondary)', fontSize: 11, lineHeight: 1.5, maxWidth: 640 }}>
-          {t('externalNotice')}
-        </p>
-      </div>
+    <li style={{
+      display: 'grid',
+      border: '1px solid var(--dsw-alias-border-l1)',
+      borderRadius: 14,
+      background: 'var(--dsw-alias-bg-layer-1)',
+      overflow: 'hidden',
+      color: 'var(--dsw-alias-label-primary)',
+    }}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={`${t(open ? 'collapse' : 'expand')}: ${title}`}
+        onClick={() => { setOpen(!open) }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          padding: '12px 14px',
+          border: 0,
+          background: 'transparent',
+          color: 'inherit',
+          font: 'inherit',
+          textAlign: 'left',
+          cursor: 'pointer',
+        }}
+      >
+        <span style={{ display: 'grid', gap: 2, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 13, fontWeight: 650 }}>{title}</span>
+          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.5 }}>{t('settingsIntro')}</span>
+        </span>
+        <StatusPill snapshot={snapshot} t={t} />
+        <span style={{ display: 'inline-flex', transform: open ? 'rotate(180deg)' : undefined, transition: 'transform 150ms' }}>
+          <IconChevronDownOutline14 aria-hidden="true" />
+        </span>
+      </button>
+      {open ? (
+        <div style={{ display: 'grid', gap: 12, padding: '4px 14px 14px', minWidth: 0 }}>
+          <p style={{ margin: 0, color: 'var(--dsw-alias-label-secondary)', fontSize: 11, lineHeight: 1.5 }}>
+            {t('externalNotice')}
+          </p>
 
-      <StatusPill snapshot={snapshot} t={t} />
+          {!writable && <p style={{ margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-warn-label)' }}>{t('readOnly')}</p>}
 
-      {!writable && <p style={{ margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-warn-label)' }}>{t('readOnly')}</p>}
-
-      <FieldGroup label={t('connection')}>
-        <CredentialField
-          t={t}
-          settingsWritable={writable}
-          settingsRevision={snapshot.revision}
-          credentialRef={typeof value?.credential === 'string' ? value.credential : ''}
-        />
-        {FIELD_DEFS.filter(f => ['endpoint', 'account', 'user', 'peerId'].includes(f.key))
-          .map(f => (
-            <InputField
-              key={f.key}
-              field={f}
-              value={value?.[f.key]}
-              writable={writable}
+          <FieldGroup label={t('connection')}>
+            <CredentialField
               t={t}
-              onCommit={(next) => write(f.key, next)}
+              settingsWritable={writable}
+              settingsRevision={snapshot.revision}
+              credentialRef={typeof value?.credential === 'string' ? value.credential : ''}
             />
-          ))}
-      </FieldGroup>
+            {FIELD_DEFS.filter(f => ['endpoint', 'account', 'user', 'peerId'].includes(f.key))
+              .map(f => (
+                <InputField
+                  key={f.key}
+                  field={f}
+                  value={value?.[f.key]}
+                  writable={writable}
+                  t={t}
+                  onCommit={(next) => write(f.key, next)}
+                />
+              ))}
+          </FieldGroup>
 
-      <FieldGroup label={t('behavior')}>
-        {FIELD_DEFS.filter(f => ['workspacePeer', 'recallPeerScope', 'recallLimit', 'recallTokenBudget', 'scoreThreshold', 'commitTokenThreshold', 'injectProfile', 'injectSkills'].includes(f.key))
-          .map(f => (
-            f.kind === 'checkbox' ? (
-              <CheckField key={f.key} field={f} checked={Boolean(value?.[f.key])} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
-            ) : f.kind === 'select' ? (
-              <SelectField key={f.key} field={f} value={String(value?.[f.key] ?? '')} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
-            ) : (
-              <InputField key={f.key} field={f} value={value?.[f.key]} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
-            )
-          ))}
-      </FieldGroup>
+          <FieldGroup label={t('behavior')}>
+            {FIELD_DEFS.filter(f => ['workspacePeer', 'recallPeerScope', 'recallLimit', 'recallTokenBudget', 'scoreThreshold', 'commitTokenThreshold', 'injectProfile', 'injectSkills'].includes(f.key))
+              .map(f => (
+                f.kind === 'checkbox' ? (
+                  <CheckField key={f.key} field={f} checked={Boolean(value?.[f.key])} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
+                ) : f.kind === 'select' ? (
+                  <SelectField key={f.key} field={f} value={String(value?.[f.key] ?? '')} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
+                ) : (
+                  <InputField key={f.key} field={f} value={value?.[f.key]} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
+                )
+              ))}
+          </FieldGroup>
 
-      <FieldGroup label={t('capture')}>
-        {FIELD_DEFS.filter(f => ['captureToolResults', 'captureAssistantTurns', 'syncTurns'].includes(f.key))
-          .map(f => (
-            <CheckField key={f.key} field={f} checked={Boolean(value?.[f.key])} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
-          ))}
-      </FieldGroup>
-    </div>
+          <FieldGroup label={t('capture')}>
+            {FIELD_DEFS.filter(f => ['captureToolResults', 'captureAssistantTurns', 'syncTurns'].includes(f.key))
+              .map(f => (
+                <CheckField key={f.key} field={f} checked={Boolean(value?.[f.key])} writable={writable} t={t} onCommit={(next) => write(f.key, next)} />
+              ))}
+          </FieldGroup>
+        </div>
+      ) : null}
+    </li>
   )
 }
 
@@ -661,30 +711,48 @@ export const inject = ['slots', 'locale', 'settingsScope']
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** OpenViking Memory Settings copy. */
+    /** OpenViking Memory plugin-card copy. */
     openviking: keyof LocaleDict
   }
 }
 
-type SettingsSectionProps = PropsRuntime<'settings.section'> & {
+/**
+ * The `settings.plugin.item` slot type, normally declared by
+ * `@deepseek-ai/dsh-client-ui-settings-plugins`. Declared here because this
+ * plugin builds its own card chrome and never imports that package; the slot
+ * key is a stable string contract either way. The deployed slot is KEYED by
+ * the settings namespace the card edits, so the registration uses `key` and
+ * the configurable tab dispatches only namespaces the Host serves.
+ */
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** One plugin's card inside the Plugins section's configurable tab, keyed by its settings namespace. */
+    'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: OpenVikingCardOwnerProps }
+  }
+}
+
+/** Owner share of a plugin card (the section supplies nothing). */
+interface OpenVikingCardOwnerProps {
+  /** Marker field: card owner props are intentionally empty. */
+  children?: never
+}
+
+type OpenVikingCardProps = PropsRuntime<'settings.plugin.item'> & {
   scope: SettingsScope<SettingsValue>
   t: (key: keyof LocaleDict) => string
 }
 
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { en, zh }), '@nextnowlabs/dsh-openviking: locale')
-  ctx.slots.inject('settings.section', () => {
+  ctx.slots.inject('settings.plugin.item', () => {
     const scope = ctx.settingsScope.bind<SettingsValue>({ namespace: NS })
     const t = ctx.locale.bind(NS)
     return ctx.slots.register({
-      name: 'settings.section',
-      id: NS,
-      order: 30,
-      label: () => t('nav'),
+      name: 'settings.plugin.item',
+      key: NS,
       inject: () => ({ scope, t }),
-    }, (props: SettingsSectionProps) => {
-      void props.close
-      return <SettingsSection scope={props.scope} t={props.t} />
+    }, (props: OpenVikingCardProps) => {
+      return <OpenVikingCard scope={props.scope} t={props.t} />
     })
   })
 }

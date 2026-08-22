@@ -11,7 +11,7 @@
 - **`viking://` 保护** — `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将虚拟 URI 当作本地路径处理。
 - **技能注入（Skill catalog）** — 注册名为 `openviking` 的 DSH 技能 provider，把保存在 OpenViking 中的技能（`viking://user/<space>/skills/` 与共享的 `viking://agent/skills`）注入进会话的 `<available_skills>` 目录；模型可像本地技能一样用 `skill` 工具按需加载完整正文。
 - **记忆工具** — 14 个 `viking_*` 工具，涵盖检索、读写、浏览、归档展开与监视管理（见[工具](#工具)）。
-- **设置** — 连接身份与召回/捕获调优可在 **设置 → OpenViking** 中实时配置。
+- **设置** — 连接身份与召回/捕获调优可在 **设置 → 插件 → 插件配置**（OpenViking 卡片）中实时配置。
 
 ## 环境要求
 
@@ -43,7 +43,7 @@ dsh --profile web --dump-config
 
 ## 配置
 
-OpenViking 的配置在 **DSH Web → 设置 → OpenViking**（`openviking` 设置命名空间）中完成；未填写的字段使用内置默认值。设置变更通过运行时的重新配置路径实时生效。
+OpenViking 的配置在 **DSH Web → 设置 → 插件 → 插件配置**（OpenViking 配置卡片，`openviking` 设置命名空间）中完成；未填写的字段使用内置默认值。设置变更通过运行时的重新配置路径实时生效。
 
 下表列出全部设置字段；「界面」列为 ✓ 表示可直接在设置界面中编辑，其余字段通过设置文档或补丁 `config` 提供。
 
