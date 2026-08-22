@@ -359,6 +359,62 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
         : `Failed to cancel watch on ${args.uri}`
     },
   }))
+
+  ctx.tools.register(textTool({
+    name: 'viking_manage_skill',
+    description: [
+      'Create, update, or delete an OpenViking skill. Skills follow the Claude Skills protocol: a directory holding one SKILL.md (frontmatter name + description + body).',
+      'create/update upload the full SKILL.md text; posting an existing name replaces its SKILL.md (upsert), and create guards against overwriting an existing skill while update guards against replacing a missing one.',
+      'delete removes the skill by name.',
+      `Target root: ${'viking:' + '//agent/skills'} for account-shared skills; omit for the current user's private skills root.`,
+    ].join(' '),
+    parameters: {
+      action: {
+        type: 'string',
+        required: true,
+        enum: ['create', 'update', 'delete'],
+        description: 'Skill operation: create (new skill), update (replace an existing one), or delete (remove by name).',
+      },
+      name: { type: 'string', required: true, description: 'Skill name (kebab-case, matches the frontmatter name and directory key).' },
+      content: {
+        type: 'string',
+        description: 'Complete SKILL.md text including the frontmatter block. Required for create/update.',
+      },
+      target_uri: {
+        type: 'string',
+        description: `Optional target root (${'viking:' + '//agent/skills'} for account-shared skills); omit for the user-private skills root.`,
+      },
+    },
+    async execute(args, exec) {
+      const actorPeerId = await peerFor(runtime, exec)
+      const name = args.name.trim()
+      if (!name) return 'Skill name must not be empty.'
+      const targetUri = args.target_uri
+
+      if (args.action === 'delete') {
+        const result = await client.deleteSkill(name, { targetUri, actorPeerId })
+        if (!result) {
+          return `Failed to delete skill "${name}": not found or the request failed.`
+        }
+        const files = result.deletedCount !== undefined ? ` (${result.deletedCount} file(s))` : ''
+        return `Deleted skill "${result.name || name}"${result.rootUri ? ` at ${result.rootUri}` : ''}${files}.`
+      }
+
+      const content = args.content?.trim()
+      if (!content) return `viking_manage_skill action=${args.action} requires content (the full SKILL.md text).`
+      const existing = await client.getSkill(name, { targetUri, actorPeerId })
+      if (args.action === 'create' && existing) {
+        return `Skill "${name}" already exists; use action=update to replace it.`
+      }
+      if (args.action === 'update' && !existing) {
+        return `Skill "${name}" does not exist; use action=create to add it.`
+      }
+      const result = await client.upsertSkill(content, { targetUri, actorPeerId })
+      if (!result) return `Failed to ${args.action} skill "${name}".`
+      const verb = args.action === 'create' ? 'Created' : 'Updated'
+      return `${verb} skill "${result.name || name}" at ${result.rootUri}${result.taskId ? ` (task ${result.taskId})` : ''}.`
+    },
+  }))
 }
 
 /** Presentation identity per tool: pending-card kind and title verb. */
@@ -377,6 +433,7 @@ const TOOL_PRESENTATION: Record<string, { kind: 'read' | 'other'; title: (args: 
   viking_glob: { kind: 'read', title: args => `OpenViking glob: ${args.pattern}` },
   viking_list_watches: { kind: 'read', title: () => 'OpenViking list watches' },
   viking_cancel_watch: { kind: 'other', title: args => `OpenViking cancel watch: ${args.uri}` },
+  viking_manage_skill: { kind: 'other', title: args => `OpenViking manage skill: ${args.action} ${args.name}` },
 }
 
 /**

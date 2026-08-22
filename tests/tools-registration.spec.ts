@@ -5,7 +5,7 @@ import { registerOpenVikingTools } from '../src/tools.ts'
 // @deepseek-ai/dsh-tools defineTool, so this test fails when a dsh rc pin
 // bump changes the ToolDefinition contract these tools rely on.
 describe('tool registration', () => {
-  it('registers all fourteen tools as valid dsh ToolDefinitions', () => {
+  it('registers all fifteen tools as valid dsh ToolDefinitions', () => {
     const registered: Array<Record<string, unknown>> = []
     const ctx = { tools: { register: definition => registered.push(definition as never) } }
     registerOpenVikingTools(ctx, {} as never, {} as never)
@@ -25,6 +25,7 @@ describe('tool registration', () => {
       'viking_glob',
       'viking_list_watches',
       'viking_cancel_watch',
+      'viking_manage_skill',
     ])
     for (const definition of registered) {
       expect(typeof definition.execute).toBe('function')
@@ -46,6 +47,7 @@ describe('tool registration', () => {
         viking_glob: { pattern: '**/*.md' },
         viking_list_watches: {},
         viking_cancel_watch: { uri: 'viking://notes.md' },
+        viking_manage_skill: { action: 'create', name: 'my-skill', content: '---\nname: my-skill\n---' },
       }
       const view = (definition.presentCall as (args: Record<string, unknown>) => Record<string, unknown>)(
         VALID_ARGS[definition.name as string]!,

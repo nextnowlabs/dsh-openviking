@@ -513,6 +513,66 @@ export class OpenVikingClient {
     return response.ok && response.result ? response.result as SkillDetail : null
   }
 
+  /**
+   * Create or update one skill from its full SKILL.md body. The server treats
+   * the skill name (frontmatter `name`, also the directory key) as the
+   * upsert identity: posting an existing name replaces its SKILL.md.
+   * @param content - the complete SKILL.md text, including frontmatter.
+   * @param options - `targetUri` selects the root (the account-shared agent
+   *   skills root when targeting shared skills; omitted means the current
+   *   user's private skills root); `actorPeerId` selects the requesting peer.
+   * @returns the upload result (root URI and task id), or `null` on failure.
+   */
+  async upsertSkill(
+    content: string,
+    options: SkillScopeOptions = {},
+  ): Promise<{ rootUri: string, uri: string, name: string, taskId?: string } | null> {
+    const body: Record<string, unknown> = { data: content }
+    if (options.targetUri) body.target_uri = options.targetUri
+    const response = await this.fetchJSON(
+      '/api/v1/skills',
+      { method: 'POST', body: JSON.stringify(body) },
+      { timeoutMs: options.timeoutMs, ...this.peer(options.actorPeerId) },
+    )
+    if (!response.ok || !response.result) return null
+    const result = response.result as Record<string, unknown>
+    return {
+      rootUri: String(result.root_uri ?? ''),
+      uri: String(result.uri ?? result.root_uri ?? ''),
+      name: String(result.name ?? ''),
+      ...(typeof result.task_id === 'string' ? { taskId: result.task_id } : {}),
+    }
+  }
+
+  /**
+   * Delete one skill by name.
+   * @param skillName - kebab-case skill name.
+   * @param options - `targetUri` disambiguates the root (the user's private
+   *   skills root when omitted); `actorPeerId` selects the requesting peer.
+   * @returns the deletion result, or `null` when the skill does not exist or
+   *   the request failed.
+   */
+  async deleteSkill(
+    skillName: string,
+    options: SkillScopeOptions = {},
+  ): Promise<{ name: string, rootUri?: string, deletedCount?: number } | null> {
+    const params = new URLSearchParams()
+    if (options.targetUri) params.set('target_uri', options.targetUri)
+    const query = params.toString()
+    const response = await this.fetchJSON(
+      `/api/v1/skills/${encodeURIComponent(skillName)}${query ? `?${query}` : ''}`,
+      { method: 'DELETE' },
+      { timeoutMs: options.timeoutMs, ...this.peer(options.actorPeerId) },
+    )
+    if (!response.ok || !response.result) return null
+    const result = response.result as Record<string, unknown>
+    return {
+      name: String(result.name ?? skillName),
+      ...(typeof result.root_uri === 'string' ? { rootUri: result.root_uri } : {}),
+      ...(typeof result.estimated_deleted_count === 'number' ? { deletedCount: result.estimated_deleted_count } : {}),
+    }
+  }
+
   /** List watch tasks (re-ingestion schedules). */
   async listWatches(actorPeerId?: string): Promise<WatchTask[]> {
     const response = await this.fetchJSON('/api/v1/watches', {}, this.peer(actorPeerId))

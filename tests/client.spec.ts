@@ -473,4 +473,100 @@ describe('OpenVikingClient', () => {
     )
     expect(detail?.content).toContain('Body.')
   })
+
+  it('uploads a skill with its full SKILL.md body and optional target root', async () => {
+    const AGENT_ROOT = 'viking:' + '//agent/skills'
+    let seen: { url: string, init: RequestInit }
+    globalThis.fetch = async (url, init) => {
+      seen = { url: String(url), init: init as RequestInit }
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: {
+          status: 'success',
+          root_uri: `${AGENT_ROOT}/my-skill`,
+          uri: `${AGENT_ROOT}/my-skill`,
+          name: 'my-skill',
+          task_id: 'task-1',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+    const result = await client.upsertSkill('---\nname: my-skill\n---\n\nBody.', {
+      targetUri: AGENT_ROOT,
+    })
+
+    expect(seen.url).toBe('http://127.0.0.1:1933/api/v1/skills')
+    expect(seen.init.method).toBe('POST')
+    expect(JSON.parse(String(seen.init.body))).toEqual({
+      data: '---\nname: my-skill\n---\n\nBody.',
+      target_uri: AGENT_ROOT,
+    })
+    expect(result).toEqual({
+      rootUri: `${AGENT_ROOT}/my-skill`,
+      uri: `${AGENT_ROOT}/my-skill`,
+      name: 'my-skill',
+      taskId: 'task-1',
+    })
+  })
+
+  it('omits target_uri for the default user skills root and fails on server errors', async () => {
+    let seenBody: Record<string, unknown> | undefined
+    globalThis.fetch = async (_url, init) => {
+      seenBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(JSON.stringify({
+        status: 'error',
+        error: { code: 'INVALID_ARGUMENT', message: 'nope' },
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+    expect(await client.upsertSkill('---\nname: x\n---')).toBeNull()
+    expect(seenBody).toEqual({ data: '---\nname: x\n---' })
+  })
+
+  it('deletes a skill by name, addressing the target root when given', async () => {
+    const AGENT_ROOT = 'viking:' + '//agent/skills'
+    let seen: { url: string, init: RequestInit }
+    globalThis.fetch = async (url, init) => {
+      seen = { url: String(url), init: init as RequestInit }
+      return new Response(JSON.stringify({
+        status: 'ok',
+        result: {
+          name: 'my-skill',
+          root_uri: `${AGENT_ROOT}/my-skill`,
+          estimated_deleted_count: 1,
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    const client = clientWith({})
+    const result = await client.deleteSkill('my-skill', { targetUri: AGENT_ROOT })
+
+    expect(seen.url).toBe(`http://127.0.0.1:1933/api/v1/skills/my-skill?target_uri=${encodeURIComponent(AGENT_ROOT)}`)
+    expect(seen.init.method).toBe('DELETE')
+    expect(result).toEqual({
+      name: 'my-skill',
+      rootUri: `${AGENT_ROOT}/my-skill`,
+      deletedCount: 1,
+    })
+  })
+
+  it('reports a missing skill on delete without target_uri', async () => {
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      status: 'error',
+      error: { code: 'NOT_FOUND', message: 'Skill not found' },
+    }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const client = clientWith({})
+    expect(await client.deleteSkill('nope')).toBeNull()
+  })
 })

@@ -10,7 +10,7 @@
 - **离线韧性（Offline resilience）** — 写入失败的内容进入 `~/.openviking/pending/`，并在下次会话开始时重放。
 - **`viking://` 保护** — `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将虚拟 URI 当作本地路径处理。
 - **技能注入（Skill catalog）** — 注册名为 `openviking` 的 DSH 技能 provider，把保存在 OpenViking 中的技能（`viking://user/<space>/skills/` 与共享的 `viking://agent/skills`）注入进会话的 `<available_skills>` 目录；模型可像本地技能一样用 `skill` 工具按需加载完整正文。
-- **记忆工具** — 14 个 `viking_*` 工具，涵盖检索、读写、浏览、归档展开与监视管理（见[工具](#工具)）。
+- **记忆工具** — 15 个 `viking_*` 工具，涵盖检索、读写、浏览、归档展开、监视管理与技能管理（见[工具](#工具)）。
 - **设置** — 连接身份与召回/捕获调优可在 **设置 → 插件 → 插件配置**（OpenViking 卡片）中实时配置。
 
 ## 环境要求
@@ -154,8 +154,9 @@ OpenViking 的配置在 **DSH Web → 设置 → 插件 → 插件配置**（Ope
 - `viking_archive_expand` — 展开当前会话的归档
 - `viking_list_watches` — 列出监视任务
 - `viking_cancel_watch` — 取消监视任务
+- `viking_manage_skill` — 创建 / 更新 / 删除技能（SKILL.md 上传，同名即覆盖；可指定共享技能根）
 
-`viking_forget` 执行永久删除。调用它的模型只应在用户明确要求删除时使用。
+`viking_forget` 与 `viking_manage_skill`（delete 动作）执行永久删除。调用它们的模型只应在用户明确要求删除时使用。
 
 ## 开发
 
