@@ -113,6 +113,7 @@ describe('OpenVikingRuntime', () => {
     } as never, config(), { debug() {} } as never)
     const session = { id: 'commit-failure', header: { cwd: '/workspace' } }
     runtime.stateFor(session).ready = true
+    runtime.stateFor(session).sessionReady = true
 
     runtime.maybeCommit(session, { type: 'turn/end' })
     await runtime.flush(session)
@@ -227,6 +228,7 @@ describe('OpenVikingRuntime', () => {
     } as never, config(), { debug() {} } as never)
     const session = { id: 'dispose', header: { cwd: '/workspace' } }
     runtime.stateFor(session).ready = true
+    runtime.stateFor(session).sessionReady = true
 
     let settled = false
     const disposing = runtime.dispose(session).then(() => {
@@ -251,7 +253,9 @@ describe('OpenVikingRuntime', () => {
       },
     } as never, config(), { debug() {} } as never)
     for (const id of ['one', 'two']) {
-      runtime.stateFor({ id, header: { cwd: `/workspace/${id}` } }).ready = true
+      const state = runtime.stateFor({ id, header: { cwd: `/workspace/${id}` } })
+      state.ready = true
+      state.sessionReady = true
     }
 
     await runtime.disposeAll()
@@ -347,5 +351,91 @@ describe('OpenVikingRuntime', () => {
     // The profile pipeline would hit /system/status, /fs/ls and /content/read;
     // with injection disabled none of those round-trips happen.
     expect(fetched).toEqual([])
+  })
+
+  it('does not create an OpenViking session when nothing is captured', async () => {
+    const pendingDir = await mkdtemp(join(tmpdir(), 'dsh-memory-lazy-'))
+    tempDirs.push(pendingDir)
+    process.env.OPENVIKING_PENDING_DIR = pendingDir
+    const ensured: string[] = []
+    let added = 0
+    const runtime = new OpenVikingRuntime({
+      async healthResult() {
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+      async ensureSessionResult(sessionId) {
+        ensured.push(String(sessionId))
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+      async addMessage() {
+        added += 1
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+    } as never, resolveConfig({
+      syncTurns: false,
+      captureAssistantTurns: false,
+      injectProfile: false,
+      workspacePeer: false,
+    }), { debug() {} } as never)
+    const session = { id: 'lazy-off', header: { cwd: '/workspace' } }
+
+    // Capture is off: initialization must not materialize the session.
+    await runtime.initialize({ session })
+    const state = runtime.stateFor(session)
+    expect(state.ready).toBe(true)
+    expect(state.sessionReady).toBe(false)
+    expect(ensured).toEqual([])
+
+    // A capture event with syncTurns off writes nothing and still no session.
+    runtime.capture(session, userEvent('Should not be captured.'))
+    await runtime.flush(session)
+    expect(added).toBe(0)
+    expect(state.sessionReady).toBe(false)
+    expect(ensured).toEqual([])
+
+    // Shutdown with nothing captured must not commit / create a session.
+    await runtime.dispose(session)
+    expect(ensured).toEqual([])
+  })
+
+  it('creates the OpenViking session lazily on the first captured message', async () => {
+    const pendingDir = await mkdtemp(join(tmpdir(), 'dsh-memory-lazy-on-'))
+    tempDirs.push(pendingDir)
+    process.env.OPENVIKING_PENDING_DIR = pendingDir
+    const ensured: string[] = []
+    const added: string[] = []
+    const runtime = new OpenVikingRuntime({
+      async healthResult() {
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+      async ensureSessionResult(sessionId) {
+        ensured.push(String(sessionId))
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+      async addMessage(sessionId) {
+        added.push(String(sessionId))
+        return { ok: true, result: {}, status: 200, traceId: undefined }
+      },
+    } as never, resolveConfig({
+      syncTurns: true,
+      captureAssistantTurns: false,
+      captureToolResults: false,
+      injectProfile: false,
+      workspacePeer: false,
+    }), { debug() {} } as never)
+    const session = { id: 'lazy-on', header: { cwd: '/workspace' } }
+
+    // Initialization alone must not create the session.
+    await runtime.initialize({ session })
+    const state = runtime.stateFor(session)
+    expect(state.sessionReady).toBe(false)
+    expect(ensured).toEqual([])
+
+    // The first captured user message writes via addMessage (server auto-creates
+    // the session) and marks the session as ready for commits.
+    runtime.capture(session, userEvent('Remember this fact.'))
+    await runtime.flush(session)
+    expect(added).toEqual(['dsh-lazy-on'])
+    expect(state.sessionReady).toBe(true)
   })
 })

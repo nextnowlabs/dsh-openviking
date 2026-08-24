@@ -36,6 +36,11 @@ interface RuntimeState {
   cwd: string
   config: OpenVikingConfig
   ready: boolean
+  /** Whether the OpenViking session has been created/confirmed on the server.
+   *  The session is only materialized lazily on the first real write
+   *  (addMessage / commit with content), never during read-only init, so
+   *  capture-disabled sessions do not accumulate empty session records. */
+  sessionReady: boolean
   initializing: Promise<RuntimeState> | null
   initializationRetryable: boolean
   profileBlock: string
@@ -107,6 +112,7 @@ export class OpenVikingRuntime {
       cwd,
       config: { ...this.config, resolvedPeerId: peerId },
       ready: false,
+      sessionReady: false,
       initializing: null,
       initializationRetryable: false,
       profileBlock: '',
@@ -142,16 +148,27 @@ export class OpenVikingRuntime {
       state.initializationRetryable = isRetryableFailure(health)
       return state
     }
-    const ensured = await this.client.ensureSessionResult(
-      state.ovSessionId,
-      state.config.resolvedPeerId,
+    // The OpenViking session is created lazily, not on every session start:
+    // a capture-disabled session must not leave an empty session record
+    // behind. Only materialize it here when there are pending writes that
+    // need a real session to replay into.
+    const pending = await listPending()
+    const hasPendingForSession = pending.some(
+      item => item.entry?.sessionId === state.ovSessionId,
     )
-    if (
-      !ensured.ok
-      && !(ensured.status === 409 && ensured.error?.code === 'ALREADY_EXISTS')
-    ) {
-      state.initializationRetryable = isRetryableFailure(ensured)
-      return state
+    if (hasPendingForSession) {
+      const ensured = await this.client.ensureSessionResult(
+        state.ovSessionId,
+        state.config.resolvedPeerId,
+      )
+      if (
+        !ensured.ok
+        && !(ensured.status === 409 && ensured.error?.code === 'ALREADY_EXISTS')
+      ) {
+        state.initializationRetryable = isRetryableFailure(ensured)
+        return state
+      }
+      state.sessionReady = true
     }
     await replayPending(
       (path, init, options) => this.client.fetchJSON(path, init, options),
@@ -268,11 +285,16 @@ export class OpenVikingRuntime {
         await this.enqueuePendingMessage(state, payload)
         return
       }
+      // addMessage auto-creates a missing session on the server, so the
+      // session is only materialized when there is actual content to write.
       const response = await this.client.addMessage(
         state.ovSessionId,
         payload,
         state.config.resolvedPeerId,
       )
+      if (response.ok) {
+        state.sessionReady = true
+      }
       if (isRetryableFailure(response)) {
         await this.enqueuePendingMessage(state, payload)
       }
@@ -285,6 +307,10 @@ export class OpenVikingRuntime {
     this.enqueueWrite(state, async () => {
       if (state.hasPendingWrites) return
       if (!state.ready && !(await this.ensureState(state)).ready) return
+      // Nothing was ever captured into a session this DSH session — there is
+      // no session to commit, so skip the (otherwise pointless) get/commit
+      // round-trips that would only create an empty session record.
+      if (!state.sessionReady) return
       const metadata = await this.client.getSession(
         state.ovSessionId,
         state.config.resolvedPeerId,
@@ -322,6 +348,10 @@ export class OpenVikingRuntime {
           return
         }
         if (!state.ready && !(await this.ensureState(state)).ready) return
+        // Nothing was captured this DSH session: there is no session to
+        // commit, so skip the shutdown commit instead of materializing an
+        // empty session record on the server.
+        if (!state.sessionReady) return
         const response = await this.client.commitSession(
           state.ovSessionId,
           state.config.resolvedPeerId,

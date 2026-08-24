@@ -123,7 +123,7 @@ OpenViking 的配置在 **DSH Web → 设置 → 插件 → 插件配置**（Ope
 - `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将 `viking://` URI 当作本地路径处理。
 - `ctx.skills` 上注册名为 `openviking` 的技能 provider：目录发现走 `GET /api/v1/skills`，正文按需经 `GET /api/v1/skills/{name}?include_content=true` 加载。每个会话构建技能目录时都会重新发现，OpenViking 中新增/修改/删除的技能随即反映到 `<available_skills>`。
 
-每个 DSH 会话都映射到 OpenViking 中的 `dsh-<session-id>`。由工作区推导的 actor 对等节点按会话解析，并随每个会话级请求发送。
+每个 DSH 会话都映射到 OpenViking 中的 `dsh-<session-id>`。由工作区推导的 actor 对等节点按会话解析，并随每个会话级请求发送。会话是**惰性创建**的：只有当实际捕获到消息、或有待重放的离线写入时才会在 OpenViking 中落盘，因此关闭捕获（`syncTurns` / `captureAssistantTurns` / `captureToolResults` 均关闭）的会话不会在服务器上留下空的会话记录。
 
 ## 技能注入
 
