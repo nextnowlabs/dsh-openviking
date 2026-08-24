@@ -127,6 +127,49 @@ export interface SkillScopeOptions {
   timeoutMs?: number
 }
 
+/**
+ * Failure envelope for a skill mutation (create/update/delete). The client
+ * never throws; every failed mutation returns this shape so callers can tell a
+ * request that never completed (where the server may already have committed
+ * the write) apart from an explicit server rejection.
+ */
+export interface SkillMutationFailure {
+  ok: false
+  /** HTTP status; `0` means no response arrived (client abort / network failure). */
+  status: number
+  /** Human-readable error message from the server or the transport. */
+  errorMessage: string
+  /**
+   * True when the request was aborted by the client timeout or otherwise
+   * failed on the wire without an HTTP response. In that case the server may
+   * already have committed the write, so the caller must treat the outcome as
+   * unknown and advise verification rather than reporting a definitive failure.
+   */
+  timedOut: boolean
+}
+
+/** Successful skill create/update (`POST /api/v1/skills`). */
+export interface SkillUpsertOk {
+  ok: true
+  rootUri: string
+  uri: string
+  name: string
+  taskId?: string
+}
+
+/** Successful skill delete (`DELETE /api/v1/skills/{name}`). */
+export interface SkillDeleteOk {
+  ok: true
+  name: string
+  rootUri?: string
+  deletedCount?: number
+}
+
+/** Result of `POST /api/v1/skills` (create/update). */
+export type SkillUpsertResult = SkillUpsertOk | SkillMutationFailure
+/** Result of `DELETE /api/v1/skills/{name}`. */
+export type SkillDeleteResult = SkillDeleteOk | SkillMutationFailure
+
 /** Client construction options. */
 export interface OpenVikingClientOptions {
   /**
@@ -136,6 +179,24 @@ export interface OpenVikingClientOptions {
    * request without any plugin restart. Omit to send requests without a key.
    */
   resolveApiKey?: () => Promise<string | undefined>
+}
+
+/**
+ * Normalize a failed skill-mutation response into a `SkillMutationFailure`
+ * envelope. `status === 0` means the request never received an HTTP response
+ * (aborted by the client timeout or a network failure); in that case the
+ * server may already have committed the write, so callers must treat the
+ * outcome as unknown.
+ */
+function skillMutationFailure(response: ApiResponse<Record<string, unknown>>): SkillMutationFailure {
+  const status = response.status
+  let errorMessage = response.error?.message
+  if (!errorMessage) {
+    if (status === 0) errorMessage = 'The request did not complete (client timeout or network error).'
+    else if (response.ok) errorMessage = `The server returned HTTP ${status} without a result payload.`
+    else errorMessage = `HTTP ${status}`
+  }
+  return { ok: false, status, errorMessage, timedOut: status === 0 }
 }
 
 export class OpenVikingClient {
@@ -521,12 +582,14 @@ export class OpenVikingClient {
    * @param options - `targetUri` selects the root (the account-shared agent
    *   skills root when targeting shared skills; omitted means the current
    *   user's private skills root); `actorPeerId` selects the requesting peer.
-   * @returns the upload result (root URI and task id), or `null` on failure.
+   * @returns `ok: true` with the upload result (root URI and task id), or a
+   *   `SkillMutationFailure` carrying the status and a `timedOut` flag so
+   *   callers can tell a never-completed request from an explicit rejection.
    */
   async upsertSkill(
     content: string,
     options: SkillScopeOptions = {},
-  ): Promise<{ rootUri: string, uri: string, name: string, taskId?: string } | null> {
+  ): Promise<SkillUpsertResult> {
     const body: Record<string, unknown> = { data: content }
     if (options.targetUri) body.target_uri = options.targetUri
     const response = await this.fetchJSON(
@@ -534,9 +597,10 @@ export class OpenVikingClient {
       { method: 'POST', body: JSON.stringify(body) },
       { timeoutMs: options.timeoutMs, ...this.peer(options.actorPeerId) },
     )
-    if (!response.ok || !response.result) return null
+    if (!response.ok || !response.result) return skillMutationFailure(response)
     const result = response.result as Record<string, unknown>
     return {
+      ok: true,
       rootUri: String(result.root_uri ?? ''),
       uri: String(result.uri ?? result.root_uri ?? ''),
       name: String(result.name ?? ''),
@@ -549,13 +613,14 @@ export class OpenVikingClient {
    * @param skillName - kebab-case skill name.
    * @param options - `targetUri` disambiguates the root (the user's private
    *   skills root when omitted); `actorPeerId` selects the requesting peer.
-   * @returns the deletion result, or `null` when the skill does not exist or
-   *   the request failed.
+   * @returns `ok: true` with the deletion result, or a `SkillMutationFailure`
+   *   when the skill does not exist, the request failed, or the request never
+   *   completed (`timedOut`).
    */
   async deleteSkill(
     skillName: string,
     options: SkillScopeOptions = {},
-  ): Promise<{ name: string, rootUri?: string, deletedCount?: number } | null> {
+  ): Promise<SkillDeleteResult> {
     const params = new URLSearchParams()
     if (options.targetUri) params.set('target_uri', options.targetUri)
     const query = params.toString()
@@ -564,9 +629,10 @@ export class OpenVikingClient {
       { method: 'DELETE' },
       { timeoutMs: options.timeoutMs, ...this.peer(options.actorPeerId) },
     )
-    if (!response.ok || !response.result) return null
+    if (!response.ok || !response.result) return skillMutationFailure(response)
     const result = response.result as Record<string, unknown>
     return {
+      ok: true,
       name: String(result.name ?? skillName),
       ...(typeof result.root_uri === 'string' ? { rootUri: result.root_uri } : {}),
       ...(typeof result.estimated_deleted_count === 'number' ? { deletedCount: result.estimated_deleted_count } : {}),

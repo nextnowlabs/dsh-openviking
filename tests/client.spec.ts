@@ -505,6 +505,7 @@ describe('OpenVikingClient', () => {
       target_uri: AGENT_ROOT,
     })
     expect(result).toEqual({
+      ok: true,
       rootUri: `${AGENT_ROOT}/my-skill`,
       uri: `${AGENT_ROOT}/my-skill`,
       name: 'my-skill',
@@ -525,7 +526,13 @@ describe('OpenVikingClient', () => {
       })
     }
     const client = clientWith({})
-    expect(await client.upsertSkill('---\nname: x\n---')).toBeNull()
+    const failed = await client.upsertSkill('---\nname: x\n---')
+    expect(failed).toMatchObject({
+      ok: false,
+      status: 400,
+      errorMessage: 'nope',
+      timedOut: false,
+    })
     expect(seenBody).toEqual({ data: '---\nname: x\n---' })
   })
 
@@ -552,6 +559,7 @@ describe('OpenVikingClient', () => {
     expect(seen.url).toBe(`http://127.0.0.1:1933/api/v1/skills/my-skill?target_uri=${encodeURIComponent(AGENT_ROOT)}`)
     expect(seen.init.method).toBe('DELETE')
     expect(result).toEqual({
+      ok: true,
       name: 'my-skill',
       rootUri: `${AGENT_ROOT}/my-skill`,
       deletedCount: 1,
@@ -567,6 +575,12 @@ describe('OpenVikingClient', () => {
       headers: { 'Content-Type': 'application/json' },
     })
     const client = clientWith({})
-    expect(await client.deleteSkill('nope')).toBeNull()
+    const failed = await client.deleteSkill('nope')
+    expect(failed).toMatchObject({
+      ok: false,
+      status: 404,
+      errorMessage: 'Skill not found',
+      timedOut: false,
+    })
   })
 })

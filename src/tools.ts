@@ -21,6 +21,17 @@ export interface ToolRegistry {
   }
 }
 
+/**
+ * Timeout for skill mutations (create/update/delete). The OpenViking server
+ * takes ~6-10s to create a skill (it runs async indexing/embedding before
+ * answering), and the DSH runtime adds a few seconds of overhead on top. The
+ * default request timeout (10s) sits right on that boundary: when the server
+ * is slow the client aborts and reports "Failed to create skill" even though
+ * the server already committed the write. Give skill mutations a generous
+ * budget so a slow-but-successful upload is not misreported as a failure.
+ */
+const SKILL_MUTATION_TIMEOUT_MS = 60_000
+
 export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingClient, runtime: OpenVikingRuntime): void {
   ctx.tools.register(textTool({
     name: 'viking_search',
@@ -392,9 +403,12 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
       const targetUri = args.target_uri
 
       if (args.action === 'delete') {
-        const result = await client.deleteSkill(name, { targetUri, actorPeerId })
-        if (!result) {
-          return `Failed to delete skill "${name}": not found or the request failed.`
+        const result = await client.deleteSkill(name, { targetUri, actorPeerId, timeoutMs: SKILL_MUTATION_TIMEOUT_MS })
+        if (!result.ok) {
+          if (result.timedOut) {
+            return `Deleting skill "${name}" did not complete (request timed out after ${SKILL_MUTATION_TIMEOUT_MS / 1000}s); the server may already have removed it — verify with viking_browse.`
+          }
+          return `Failed to delete skill "${name}": ${result.errorMessage}`
         }
         const files = result.deletedCount !== undefined ? ` (${result.deletedCount} file(s))` : ''
         return `Deleted skill "${result.name || name}"${result.rootUri ? ` at ${result.rootUri}` : ''}${files}.`
@@ -402,15 +416,24 @@ export function registerOpenVikingTools(ctx: ToolRegistry, client: OpenVikingCli
 
       const content = args.content?.trim()
       if (!content) return `viking_manage_skill action=${args.action} requires content (the full SKILL.md text).`
-      const existing = await client.getSkill(name, { targetUri, actorPeerId })
+      // The existence pre-check runs on the same generous timeout as the
+      // mutation: a slow server must not make us decide "does not exist" (and
+      // then silently upsert over an existing skill) just because the check
+      // itself was aborted.
+      const existing = await client.getSkill(name, { targetUri, actorPeerId, timeoutMs: SKILL_MUTATION_TIMEOUT_MS })
       if (args.action === 'create' && existing) {
         return `Skill "${name}" already exists; use action=update to replace it.`
       }
       if (args.action === 'update' && !existing) {
         return `Skill "${name}" does not exist; use action=create to add it.`
       }
-      const result = await client.upsertSkill(content, { targetUri, actorPeerId })
-      if (!result) return `Failed to ${args.action} skill "${name}".`
+      const result = await client.upsertSkill(content, { targetUri, actorPeerId, timeoutMs: SKILL_MUTATION_TIMEOUT_MS })
+      if (!result.ok) {
+        if (result.timedOut) {
+          return `${args.action === 'create' ? 'Creating' : 'Updating'} skill "${name}" did not complete (request timed out after ${SKILL_MUTATION_TIMEOUT_MS / 1000}s); the server may already have ${args.action === 'create' ? 'created' : 'updated'} it — verify with viking_browse.`
+        }
+        return `Failed to ${args.action} skill "${name}": ${result.errorMessage}`
+      }
       const verb = args.action === 'create' ? 'Created' : 'Updated'
       return `${verb} skill "${result.name || name}" at ${result.rootUri}${result.taskId ? ` (task ${result.taskId})` : ''}.`
     },
