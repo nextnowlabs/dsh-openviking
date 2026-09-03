@@ -21,9 +21,9 @@ const FORBIDDEN_PATTERN = new RegExp([
   frag('豆', '包'),
 ].join('|'), 'i')
 
-/** Extract the rc number from a `0.1.0-rc.N` version/range string. */
+/** Extract the rc number from a `0.1.2-rc.N` version/range string. */
 function rcNumber(value: string): number {
-  const match = value.match(/0\.1\.0-rc\.(\d+)/)
+  const match = value.match(/0\.1\.2-rc\.(\d+)/)
   return match ? Number(match[1]) : -1
 }
 
@@ -38,8 +38,8 @@ describe('bundle shape', () => {
     expect(manifest.name).toBe('@nextnowlabs/dsh-openviking')
     expect(manifest.dependencies).toBeUndefined()
     // dsh constructors come from peers the installation heals at runtime.
-    // Peers are FLEXIBLE ranges (^0.1.0-rc.6) because DSH rc releases move fast
-    // (rc.8 is current and updates are frequent): an exact pin would break
+    // Peers are FLEXIBLE ranges (^0.1.2-rc.1) because DSH rc releases move fast
+    // (0.1.2-rc.1 is current and updates are frequent): an exact pin would break
     // installs into every newer profile. Each dsh devDependency is pinned to a
     // concrete version that must lie INSIDE its peer range, so CI tests against
     // a real DSH surface the plugin also accepts at runtime.
@@ -47,9 +47,9 @@ describe('bundle shape', () => {
     const devs = manifest.devDependencies as Record<string, string>
     for (const [name, version] of Object.entries(peers)) {
       if (!name.startsWith('@deepseek-ai/dsh-')) continue
-      expect(version).toMatch(/^\^0\.1\.0-rc\.\d+$/, `${name} peer must be a 0.1.0-rc caret range`)
+      expect(version).toMatch(/^\^0\.1\.2-rc\.\d+$/, `${name} peer must be a 0.1.2-rc caret range`)
       const dev = devs[name]
-      expect(dev).toMatch(/^0\.1\.0-rc\.\d+$/, `${name} devDependency must be a concrete 0.1.0-rc version`)
+      expect(dev).toMatch(/^0\.1\.2-rc\.\d+$/, `${name} devDependency must be a concrete 0.1.2-rc version`)
       expect(rcNumber(dev)).toBeGreaterThanOrEqual(rcNumber(version.slice(1)))
     }
     expect(peers['@deepseek-ai/dsh-tools']).toBeTruthy()

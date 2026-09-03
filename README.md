@@ -15,7 +15,7 @@
 
 ## 环境要求
 
-- `@deepseek-ai/dsh` `0.1.0-rc.6` 或更新的 `0.1.0-rc.N` 版本
+- `@deepseek-ai/dsh` `0.1.2-rc.1` 或更新的 `0.1.2-rc.N` 版本
 - Node.js `^22.19.0` 或 `>=24`
 - 可访问的 OpenViking 服务器
 

@@ -22,7 +22,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
-import { installSettingsSection } from '@deepseek-ai/dsh-settings'
 import { OpenVikingClient } from './ov-client.ts'
 import {
   Config,
@@ -46,10 +45,10 @@ export { Config, OPENVIKING_SETTINGS_NAMESPACE }
 export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): () => void {
   // The active configuration source: the resolved `openviking` settings section
   // while a settings service is mounted, the composition entry otherwise. The
-  // settings dependency is deliberately OPTIONAL (installSettingsSection): on
-  // host profiles without a settings provider the plugin must still activate
-  // and run on the entry config instead of hanging the boot report on a
-  // missing `settings` service.
+  // settings dependency is deliberately OPTIONAL (the `settings.installSection`
+  // wiring rides a `ctx.inject(['settings'])` fiber): on host profiles without
+  // a settings provider the plugin must still activate and run on the entry
+  // config instead of hanging the boot report on a missing `settings` service.
   let source: () => Partial<OpenVikingSettings> = () => input
   let config = resolveConfig(input)
 
@@ -112,13 +111,18 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
   // Optional settings wiring: register the `openviking` namespace and reapply
   // on change when a settings service exists (desktop/host profiles); on
   // profiles without one the plugin keeps the composition entry config, so
-  // activation never blocks on the service.
-  installSettingsSection(ctx, OPENVIKING_SETTINGS_NAMESPACE, Config, input as OpenVikingSettings, {
-    // `onChange` runs right after `setSource` on attach/detach, so re-deriving
-    // only there (never here) avoids a redundant double re-apply at startup.
-    setSource: (next) => { source = next },
-    onChange: applyConfig,
-    validate: (value) => { resolveConfig(value) },
+  // activation never blocks on the service. DSH 0.1.2-rc.1 replaced the
+  // standalone `installSettingsSection` with `SettingsProvider.installSection`
+  // (same hooks contract), so the optional seam is expressed with `ctx.inject`
+  // exactly like the old helper did internally.
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.installSection(ctx, OPENVIKING_SETTINGS_NAMESPACE, Config, input as OpenVikingSettings, {
+      // `onChange` runs right after `setSource` on attach/detach, so re-deriving
+      // only there (never here) avoids a redundant double re-apply at startup.
+      setSource: (next) => { source = next },
+      onChange: applyConfig,
+      validate: (value) => { resolveConfig(value) },
+    })
   })
 
   ctx.on('agent/session-start', ({ agent }) => {

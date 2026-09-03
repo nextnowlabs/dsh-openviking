@@ -15,13 +15,22 @@
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
-import { settingsNamespace, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
+import { type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { buildUserAgent } from './shared/credentials.ts'
 import { resolveEffectivePeerId } from './shared/workspace-peer.ts'
 import { PLUGIN_VERSION } from './version.ts'
 
-/** Settings document namespace owned by this plugin. */
-export const OPENVIKING_SETTINGS_NAMESPACE: SettingsNamespace = settingsNamespace('openviking')
+/**
+ * Settings document namespace owned by this plugin.
+ *
+ * DSH 0.1.2-rc.1 no longer exports a `settingsNamespace()` constructor: the
+ * brand is applied implicitly by `settings.register()` /
+ * `settings.installSection()` (they type-check and validate the literal at
+ * compile/runtime time), and the settings wire types consume the branded type
+ * directly. The constant keeps the value branded so it can be passed to
+ * `SettingsConflictError` and compared against `SettingsDescriptor.ns`.
+ */
+export const OPENVIKING_SETTINGS_NAMESPACE: SettingsNamespace = 'openviking' as SettingsNamespace
 
 /** Default OpenViking server endpoint. */
 export const DEFAULT_OPENVIKING_ENDPOINT = 'http://127.0.0.1:1933'

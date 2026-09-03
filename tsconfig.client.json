@@ -28,7 +28,7 @@
     "noEmitOnError": true,
     "paths": {
       "@deepseek-ai/dsh-api-remotes/client": ["./node_modules/@deepseek-ai/dsh-api-remotes/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-runtime/client": ["./node_modules/@deepseek-ai/dsh-client-runtime/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer/client": ["./node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-credentials/types": ["./node_modules/@deepseek-ai/dsh-credentials/lib/types/types.d.ts"],
       "@deepseek-ai/dsh-settings/types": ["./node_modules/@deepseek-ai/dsh-settings/lib/types/types.d.ts"],
       "@deepseek-ai/dsh-client-ui-settings/client": ["./node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],

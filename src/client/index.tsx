@@ -30,9 +30,14 @@ import {
   type ReactNode,
 } from 'react'
 import { Button, IconChevronDownOutline14, Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { ClientContext, SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+// DSH 0.1.2-rc.1 moved the `ctx.slots` service declaration out of
+// `dsh-client-runtime` (removed) into the renderer package; the type-only
+// import activates the SlotRegistry Context merge.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 
 const NS = 'openviking'
