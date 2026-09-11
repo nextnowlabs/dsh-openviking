@@ -21,9 +21,17 @@ const FORBIDDEN_PATTERN = new RegExp([
   frag('豆', '包'),
 ].join('|'), 'i')
 
-/** Extract the rc number from a `0.1.2-rc.N` version/range string. */
+/**
+ * The DSH release line this bundle is built against: the single place to bump
+ * on a DSH upgrade. Peers below are asserted to be a `^<DSH_RELEASE>-rc.N`
+ * caret range and devDependencies a concrete `<DSH_RELEASE>-rc.N` pin.
+ */
+const DSH_RELEASE = '0.1.5'
+const DSH_RELEASE_PATTERN = DSH_RELEASE.replaceAll('.', '\\.')
+
+/** Extract the rc number from a `<DSH_RELEASE>-rc.N` version/range string. */
 function rcNumber(value: string): number {
-  const match = value.match(/0\.1\.2-rc\.(\d+)/)
+  const match = value.match(new RegExp(`${DSH_RELEASE_PATTERN}-rc\\.(\\d+)`))
   return match ? Number(match[1]) : -1
 }
 
@@ -38,8 +46,8 @@ describe('bundle shape', () => {
     expect(manifest.name).toBe('@nextnowlabs/dsh-openviking')
     expect(manifest.dependencies).toBeUndefined()
     // dsh constructors come from peers the installation heals at runtime.
-    // Peers are FLEXIBLE ranges (^0.1.2-rc.1) because DSH rc releases move fast
-    // (0.1.2-rc.1 is current and updates are frequent): an exact pin would break
+    // Peers are FLEXIBLE ranges (^0.1.5-rc.2) because DSH rc releases move fast
+    // (0.1.5-rc.2 is current and updates are frequent): an exact pin would break
     // installs into every newer profile. Each dsh devDependency is pinned to a
     // concrete version that must lie INSIDE its peer range, so CI tests against
     // a real DSH surface the plugin also accepts at runtime.
@@ -47,9 +55,9 @@ describe('bundle shape', () => {
     const devs = manifest.devDependencies as Record<string, string>
     for (const [name, version] of Object.entries(peers)) {
       if (!name.startsWith('@deepseek-ai/dsh-')) continue
-      expect(version).toMatch(/^\^0\.1\.2-rc\.\d+$/, `${name} peer must be a 0.1.2-rc caret range`)
+      expect(version).toMatch(new RegExp(`^\\^${DSH_RELEASE_PATTERN}-rc\\.\\d+$`), `${name} peer must be a ${DSH_RELEASE}-rc caret range`)
       const dev = devs[name]
-      expect(dev).toMatch(/^0\.1\.2-rc\.\d+$/, `${name} devDependency must be a concrete 0.1.2-rc version`)
+      expect(dev).toMatch(new RegExp(`^${DSH_RELEASE_PATTERN}-rc\\.\\d+$`), `${name} devDependency must be a concrete ${DSH_RELEASE}-rc version`)
       expect(rcNumber(dev)).toBeGreaterThanOrEqual(rcNumber(version.slice(1)))
     }
     expect(peers['@deepseek-ai/dsh-tools']).toBeTruthy()
