@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **自动召回（Auto-recall）** — `agent/pre-step` 使用当前步骤的输入进行检索，并追加一条持久化、带来源标注的插件用户消息。
-- **用户画像注入（Profile injection）** — `agent/session-start` 注入 OpenViking 用户画像与可用记忆索引。
+- **用户画像注入（Profile injection）** — `agent/created` 注入 OpenViking 用户画像与可用记忆索引。
 - **会话捕获（Session capture）** — `session/event` 捕获用户、助手以及（可选）工具结果消息，无需抓取对话记录；`turn/end` 在待处理令牌数达到阈值时提交。
 - **离线韧性（Offline resilience）** — 写入失败的内容进入 `~/.openviking/pending/`，并在下次会话开始时重放。
 - **`viking://` 保护** — `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将虚拟 URI 当作本地路径处理。
@@ -15,7 +15,7 @@
 
 ## 环境要求
 
-- `@deepseek-ai/dsh` `0.1.5-rc.2` 或更新的 `0.1.5-rc.N` 版本
+- `@deepseek-ai/dsh` `0.1.6-alpha.2` 或更新的 `0.1.6-alpha.N` 版本
 - Node.js `^22.19.0` 或 `>=24`
 - 可访问的 OpenViking 服务器
 

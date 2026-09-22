@@ -23,15 +23,19 @@ const FORBIDDEN_PATTERN = new RegExp([
 
 /**
  * The DSH release line this bundle is built against: the single place to bump
- * on a DSH upgrade. Peers below are asserted to be a `^<DSH_RELEASE>-rc.N`
- * caret range and devDependencies a concrete `<DSH_RELEASE>-rc.N` pin.
+ * on a DSH upgrade. DSH ships pre-releases as `-<stage>.N`, where the stage is
+ * `alpha` on the current line and was `rc` on the previous one, so both the
+ * release and the stage are named here. Peers below are asserted to be a
+ * `^<DSH_RELEASE>-<stage>.N` caret range and devDependencies a concrete pin.
  */
-const DSH_RELEASE = '0.1.5'
+const DSH_RELEASE = '0.1.6'
+const DSH_STAGE = 'alpha'
 const DSH_RELEASE_PATTERN = DSH_RELEASE.replaceAll('.', '\\.')
+const DSH_VERSION_PATTERN = `${DSH_RELEASE_PATTERN}-${DSH_STAGE}\\.(\\d+)`
 
-/** Extract the rc number from a `<DSH_RELEASE>-rc.N` version/range string. */
-function rcNumber(value: string): number {
-  const match = value.match(new RegExp(`${DSH_RELEASE_PATTERN}-rc\\.(\\d+)`))
+/** Extract the pre-release number from a `<DSH_RELEASE>-<stage>.N` version/range string. */
+function prereleaseNumber(value: string): number {
+  const match = value.match(new RegExp(DSH_VERSION_PATTERN))
   return match ? Number(match[1]) : -1
 }
 
@@ -46,19 +50,19 @@ describe('bundle shape', () => {
     expect(manifest.name).toBe('@nextnowlabs/dsh-openviking')
     expect(manifest.dependencies).toBeUndefined()
     // dsh constructors come from peers the installation heals at runtime.
-    // Peers are FLEXIBLE ranges (^0.1.5-rc.2) because DSH rc releases move fast
-    // (0.1.5-rc.2 is current and updates are frequent): an exact pin would break
-    // installs into every newer profile. Each dsh devDependency is pinned to a
-    // concrete version that must lie INSIDE its peer range, so CI tests against
-    // a real DSH surface the plugin also accepts at runtime.
+    // Peers are FLEXIBLE ranges (^0.1.6-alpha.2) because DSH pre-releases move
+    // fast (0.1.6-alpha.2 is current and updates are frequent): an exact pin
+    // would break installs into every newer profile. Each dsh devDependency is
+    // pinned to a concrete version that must lie INSIDE its peer range, so CI
+    // tests against a real DSH surface the plugin also accepts at runtime.
     const peers = manifest.peerDependencies as Record<string, string>
     const devs = manifest.devDependencies as Record<string, string>
     for (const [name, version] of Object.entries(peers)) {
       if (!name.startsWith('@deepseek-ai/dsh-')) continue
-      expect(version).toMatch(new RegExp(`^\\^${DSH_RELEASE_PATTERN}-rc\\.\\d+$`), `${name} peer must be a ${DSH_RELEASE}-rc caret range`)
+      expect(version).toMatch(new RegExp(`^\\^${DSH_VERSION_PATTERN}$`), `${name} peer must be a ^${DSH_RELEASE}-${DSH_STAGE}.N caret range`)
       const dev = devs[name]
-      expect(dev).toMatch(new RegExp(`^${DSH_RELEASE_PATTERN}-rc\\.\\d+$`), `${name} devDependency must be a concrete ${DSH_RELEASE}-rc version`)
-      expect(rcNumber(dev)).toBeGreaterThanOrEqual(rcNumber(version.slice(1)))
+      expect(dev).toMatch(new RegExp(`^${DSH_VERSION_PATTERN}$`), `${name} devDependency must be a concrete ${DSH_RELEASE}-${DSH_STAGE}.N version`)
+      expect(prereleaseNumber(dev)).toBeGreaterThanOrEqual(prereleaseNumber(version.slice(1)))
     }
     expect(peers['@deepseek-ai/dsh-tools']).toBeTruthy()
     expect(peers['@deepseek-ai/dsh-llm']).toBeTruthy()

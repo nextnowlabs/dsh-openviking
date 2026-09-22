@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { registerOpenVikingTools } from '../src/tools.ts'
 
 // Registration-shape gate: every definition flows through the pinned
-// @deepseek-ai/dsh-tools defineTool, so this test fails when a dsh rc pin
+// @deepseek-ai/dsh-tools defineTool, so this test fails when a dsh pin
 // bump changes the ToolDefinition contract these tools rely on.
 describe('tool registration', () => {
   it('registers all fifteen tools as valid dsh ToolDefinitions', () => {

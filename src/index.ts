@@ -125,12 +125,22 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
     })
   })
 
-  ctx.on('agent/session-start', ({ agent }) => {
-    agent.ctx.effect(
-      () => () => runtime.dispose(agent.session),
-      'openvikingMemory.disposeSession()',
-    )
-    return injectStartupProfile(agent, runtime)
+  // The profile lands through `agent/created`, which DSH dispatches as a
+  // SERIAL event: listeners run in order and are awaited before creation
+  // resolves, so the block is present before the loop's first request. A
+  // throw/rejection here would veto agent creation, and an optional memory
+  // backend must never do that — the whole body is contained and logged.
+  ctx.on('agent/created', async ({ agent }) => {
+    try {
+      agent.ctx.effect(
+        () => () => runtime.dispose(agent.session),
+        'openvikingMemory.disposeSession()',
+      )
+      await injectStartupProfile(agent, runtime)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      ctx.logger.warn('[openviking:dsh] startup initialization failed: %s', message)
+    }
   })
 
   // prepend: downstream waterfall listeners run first, so this plugin sees

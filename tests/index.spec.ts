@@ -106,4 +106,34 @@ describe('plugin apply', () => {
 
     expect(seen).toEqual(['downstream replacement'])
   })
+
+  it('initializes on the serial agent/created event and contains failures', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'dsh-index-state-'))
+    const pendingDir = await mkdtemp(join(tmpdir(), 'dsh-index-pending-'))
+    tempDirs.push(stateDir, pendingDir)
+    process.env.OPENVIKING_STATE_DIR = stateDir
+    process.env.OPENVIKING_PENDING_DIR = pendingDir
+
+    const { ctx, handlers } = makeCtx()
+    const warnings: unknown[][] = []
+    ctx.logger.warn = (...args: unknown[]) => { warnings.push(args) }
+    apply(ctx, {})
+
+    // DSH 0.1.6 removed `agent/session-start`; startup work now rides the
+    // serial `agent/created` event, which is awaited before the loop runs.
+    expect(handlers.has('agent/session-start')).toBe(false)
+    const created = handlers.get('agent/created') as (payload: unknown) => Promise<void>
+    expect(typeof created).toBe('function')
+
+    // `agent/created` is awaited and a rejection vetoes agent creation, so a
+    // failing OpenViking initialization must not propagate out of the listener.
+    const agent = {
+      session: { id: 'dsh-created', header: { cwd: '/workspace' } },
+      ctx: { effect() { throw new Error('effect registration failed') } },
+    }
+    await expect(created({ agent, source: 'startup' })).resolves.toBeUndefined()
+    expect(warnings).toEqual([
+      ['[openviking:dsh] startup initialization failed: %s', 'effect registration failed'],
+    ])
+  })
 })
