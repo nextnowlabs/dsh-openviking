@@ -4,7 +4,7 @@
  * @module openviking-memory/runtime
  */
 
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { OpenVikingClient } from './ov-client.ts'
 import type { OpenVikingConfig } from './config.ts'
 import { buildProfileBlock } from './shared/profile-inject.ts'
@@ -18,7 +18,7 @@ import {
 } from './shared/pending-queue.ts'
 import { isRetryableFailure } from './shared/retryable.ts'
 import { resolveEffectivePeerId } from './shared/workspace-peer.ts'
-import { captureEvent, OPENVIKING_PLUGIN_SOURCE, promptText } from './capture.ts'
+import { captureEvent, promptText } from './capture.ts'
 
 export interface SessionLike {
   id: string
@@ -448,14 +448,31 @@ export class OpenVikingRuntime {
   }
 }
 
+/**
+ * Declare this plugin's message source.
+ *
+ * DSH 0.1.7 deleted the shared catch-all `plugin` source kind in favour of a
+ * merge-extensible map each producer extends with its own: a user message may
+ * carry any producer's kind, and consumers fall through unknown kinds. The
+ * `form` discriminator rides along unchanged — `instructions` marks the
+ * session-start profile block, `recall` the per-step recall block — so DSH's
+ * own context accounting still sees what each message is.
+ */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'openviking-memory': {
+      kind: 'openviking-memory'
+    } & ContextFormed
+  }
+}
+
 function pluginMessage(content: string, form: 'instructions' | 'recall'): ReturnType<typeof createUserMessage> {
   // dsh's own constructor: identity, normalization, and any future Message
   // invariants come from the pinned peer instead of a hand-built object.
   return createUserMessage({
     content: [{ type: 'text', text: content }],
     source: {
-      kind: 'plugin',
-      plugin: OPENVIKING_PLUGIN_SOURCE,
+      kind: 'openviking-memory',
       form,
     },
   })

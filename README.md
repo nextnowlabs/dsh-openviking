@@ -11,11 +11,11 @@
 - **`viking://` 保护** — `tools/pre-execute` 阻止 DSH 文件系统与 Shell 工具将虚拟 URI 当作本地路径处理。
 - **技能注入（Skill catalog）** — 注册名为 `openviking` 的 DSH 技能 provider，把保存在 OpenViking 中的技能（`viking://user/<space>/skills/` 与共享的 `viking://agent/skills`）注入进会话的 `<available_skills>` 目录；模型可像本地技能一样用 `skill` 工具按需加载完整正文。
 - **记忆工具** — 15 个 `viking_*` 工具，涵盖检索、读写、浏览、归档展开、监视管理与技能管理（见[工具](#工具)）。
-- **设置** — 连接身份与召回/捕获调优可在 **设置 → 插件 → 插件配置**（OpenViking 卡片）中实时配置。
+- **设置** — 连接身份、API 密钥与召回/捕获调优在 **设置 → 插件 → OpenViking Memory** 页面中集中配置，保存后即时生效，无需重启。
 
 ## 环境要求
 
-- `@deepseek-ai/dsh` `0.1.6-alpha.2` 或更新的 `0.1.6-alpha.N` 版本
+- `@deepseek-ai/dsh` `0.1.7-alpha.1` 或更新的 `0.1.7-alpha.N` 版本
 - Node.js `^22.19.0` 或 `>=24`
 - 可访问的 OpenViking 服务器
 
@@ -43,16 +43,18 @@ dsh --profile web --dump-config
 
 ## 配置
 
-OpenViking 的配置在 **DSH Web → 设置 → 插件 → 插件配置**（OpenViking 配置卡片，`openviking` 设置命名空间）中完成；未填写的字段使用内置默认值。设置变更通过运行时的重新配置路径实时生效。
+OpenViking 的配置在 **DSH Web → 设置 → 插件 → OpenViking Memory** 页面中完成；未填写的字段使用内置默认值。
 
-下表列出全部设置字段；「界面」列为 ✓ 表示可直接在设置界面中编辑，其余字段通过设置文档或补丁 `config` 提供。
+该页面是插件的配置入口：它把用户填写的值暂存（staged），点击「保存」时一次性以修订号（revision）为栅栏写入，未保存的编辑会在离开页面时丢弃。DSH 0.1.7 的配置模型是**补丁即配置**——插件不再注册设置命名空间，配置写回 profile 补丁中本插件那一行的 `config`；行 id 为 `openviking-memory-runtime`（由本包的 `cordis.patch.yml` 声明），DSH 就用这个 id 寻址配置表单、`settings/document-updated` 事件与浏览器页面。运行时持有的每个字段都是 DSH 维护的 volatile 引用，写入后插件在收到该行的事件时重新解析整份配置并热应用。
+
+下表列出全部设置字段；「界面」列为 ✓ 表示可直接在上述页面中编辑，其余字段可在 profile 补丁的该行 `config` 中提供。
 
 ### 连接
 
 | 字段 | 界面 | 默认值 | 用途 |
 | --- | :-: | --- | --- |
 | 服务器端点 `endpoint` | ✓ | `http://127.0.0.1:1933` | OpenViking 服务器基础 URL |
-| 凭据引用 `credential` | ✓ | `OPENVIKING_API_KEY` | 保存 Bearer API 密钥的 DSH 凭据引用（环境风格名称）；密钥本体存储在 DSH 凭据存储中，不在设置文档内 |
+| 凭据引用 `credential` | | `OPENVIKING_API_KEY` | 保存 Bearer API 密钥的 DSH 凭据引用（环境风格名称）；密钥本体存储在 DSH 凭据存储中，不写入补丁 |
 | 账号 `account` | ✓ | *(空)* | 受信模式账号 |
 | 用户 `user` | ✓ | *(空)* | 受信模式用户 |
 | Actor 对等节点 ID `peerId` | ✓ | *(空)* | 显式对等节点；留空则按会话工作区推导 |
@@ -89,7 +91,7 @@ OpenViking 的配置在 **DSH Web → 设置 → 插件 → 插件配置**（Ope
 | 工具结果捕获最大字符 `captureToolMaxChars` | | `1000000` | 每条捕获工具结果的最大字符数 |
 | 提交保留最近条数 `commitKeepRecentCount` | | `10` | 提交后保留在活动会话中的最近消息条数 |
 
-补丁还可以携带插件配置（含不在界面展示的字段，如 `captureMode`、`requestTimeoutMs`）：
+补丁还可以携带插件配置（含不在界面展示的字段，如 `captureMode`、`requestTimeoutMs`）；该行的 `config` 就是 DSH 配置页面的存储位置，界面写入的值也会落到这里：
 
 ```yaml
 - insert:
@@ -113,8 +115,8 @@ OpenViking 的配置在 **DSH Web → 设置 → 插件 → 插件配置**（Ope
 
 ## 行为说明
 
-- **API 密钥存放在 DSH 凭据存储**：设置文档与插件配置只携带 `credential` 引用（默认 `OPENVIKING_API_KEY`）。每个 OpenViking 请求在发出前经 `ctx.credentials.resolve(credential)` 解析密钥并以 `Authorization: Bearer` 发送，因此凭据变更在下一个请求即生效，无需重启；设置界面通过 `/_dsh/openviking/settings` 同源路由写入新密钥，浏览器永不见其明文。
-- `agent/session-start` 通过 `agent.inject()` 注入 OpenViking 画像与可用记忆索引（`injectProfile` 关闭时不注入，且初始化不再拉取画像）。
+- **API 密钥存放在 DSH 凭据存储**：插件配置只携带 `credential` 引用（默认 `OPENVIKING_API_KEY`）。每个 OpenViking 请求在发出前经 `ctx.credentials.resolve(credential)` 解析密钥并以 `Authorization: Bearer` 发送，因此凭据变更在下一个请求即生效，无需重启；设置页面通过 DSH 的 Remote 凭据域（`credentials/describe`、`credentials/set`）读写密钥，浏览器只看到「是否已配置」与来源，永不见其明文。
+- `agent/created`（DSH 的串行事件，在模型循环开始前 await）通过 `agent.inject()` 注入 OpenViking 画像与可用记忆索引（`injectProfile` 关闭时不注入，且初始化不再拉取画像）。
 - `agent/pre-step` 使用当前步骤的输入进行检索，并将一条持久化、带来源标注的用户消息追加到同一步骤。画像与召回上下文以会话事件进入，可重放、对压缩可见且不会进入请求头。
 - 画像与召回在 `agent/pre-step` 中**并行构建**，并受 `recallTimeoutMs` 硬性截止时间约束：慢/远端服务器超时后该步直接跳过召回（或画像），绝不阻塞模型步；画像构建在基础链路之前启动，与系统提示词装配重叠。
 - `session/event` 捕获用户、助手以及（可选）工具结果消息，无需抓取对话记录。
@@ -172,6 +174,17 @@ pnpm run typecheck    # server + client 的 no-emit 类型检查
 `lib/` 由 `pnpm run build` 生成，`npm publish` 的 `prepack` 钩子会在发布前自动重新构建。
 
 `live-recall.spec.ts` 是一个针对真实 OpenViking 服务器的可选端到端门禁：设置 `OPENVIKING_E2E=1` 并在测试配置中填入连接凭据即可启用；否则跳过。
+
+### DSH 0.1.7 适配要点
+
+0.1.7 重做了配置与设置域，本插件随之改动如下（升级 DSH 时先看这里）：
+
+- **设置命名空间已不存在**。`SettingsProvider.register()` / `installSection()`、`settings.yaml`、`SettingsNamespace` 全部移除；配置就是 profile 补丁里本插件那一行的 `config`，由该行的 Cordis `Config` schema 描述，并以**行 id**（`openviking-memory-runtime`）寻址。插件侧的常量是 `OPENVIKING_ENTRY_ID`，浏览器侧镜像同一字面量。
+- **可配置字段必须声明 `.volatile()`**。DSH 只用声明了 volatile 的字段构建配置表单，并且这类字段在插件里是 `Volatile<T>` 引用（用 `get()` 读取）而不是拷贝值；`tests/config.spec.ts` 与 `scripts/smoke-artifact.mjs` 都会断言这一点。`resolveConfig()` 同时接受引用与普通对象。
+- **配置变更由事件驱动**：DSH 原地更新引用并在 `settings/document-updated` 上公告该行；插件据此重新解析整份配置并热应用（`runtime.reconfigure`），无变化的重复公告由签名比对挡掉。
+- **消息来源不再有通用 `plugin` 种类**：每个生产者声明自己的 `MessageSourceMap` 条目。本插件声明 `openviking-memory`，捕获侧的白名单也从「跳过 plugin」改为「只收人类输入」。
+- **浏览器设置页走 `plugins.item` 槽位**：旧的 `settings.plugin.item` 卡片、`ctx.settingsScope` 与 `/_dsh/openviking/settings` 同源路由均已移除。页面以 `view: 'summary' | 'page'` 渲染，配置读写走 `ctx.configForms`，API 密钥读写走 DSH 的 Remote 凭据域（`credentials/describe`、`credentials/set`）。
+- **`dsh-host-webserver` 依赖已随该路由一并移除**。
 
 ## 发布
 

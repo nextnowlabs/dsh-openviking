@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { OPENVIKING_ENTRY_ID } from '../src/config.ts'
 import { apply } from '../src/index.ts'
 
 const originalStateDir = process.env.OPENVIKING_STATE_DIR
@@ -20,9 +21,6 @@ function makeCtx() {
   const handlers = new Map<string, (...args: never[]) => unknown>()
   const ctx = {
     logger: { debug() {}, info() {}, warn() {}, error() {} },
-    // The settings wiring is optional (installSettingsSection): no settings
-    // service is mounted here, so activation must proceed on the entry config.
-    inject() {},
     provide() {},
     effect(execute: () => unknown) {
       execute()
@@ -107,8 +105,7 @@ describe('plugin apply', () => {
     expect(seen).toEqual(['downstream replacement'])
   })
 
-  it('initializes on the serial agent/created event and contains failures', async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), 'dsh-index-state-'))
+  it('initializes on the serial agent/created event and contains failures', async () => {    const stateDir = await mkdtemp(join(tmpdir(), 'dsh-index-state-'))
     const pendingDir = await mkdtemp(join(tmpdir(), 'dsh-index-pending-'))
     tempDirs.push(stateDir, pendingDir)
     process.env.OPENVIKING_STATE_DIR = stateDir
@@ -135,5 +132,50 @@ describe('plugin apply', () => {
     expect(warnings).toEqual([
       ['[openviking:dsh] startup initialization failed: %s', 'effect registration failed'],
     ])
+  })
+
+  it('reapplies the entry config only for this row\'s settings change', () => {
+    const { ctx, handlers } = makeCtx()
+    const applied: unknown[][] = []
+    const refused: unknown[][] = []
+    ctx.logger.info = (...args: unknown[]) => { applied.push(args) }
+    ctx.logger.warn = (...args: unknown[]) => { refused.push(args) }
+
+    // A live volatile reference, in the shape @deepseek-ai/cosmokit produces:
+    // DSH rewrites it in place and announces the row on
+    // `settings/document-updated`, which is the only signal this plugin gets.
+    let recallLimit: unknown = 10
+    let read: () => unknown = () => recallLimit
+    const reference = {
+      get: () => read(),
+      [Symbol.for('cosmokit.volatile.write')]: () => {},
+    }
+    apply(ctx, { recallLimit: reference })
+
+    const changed = handlers.get('settings/document-updated') as (ns: string, revision: number) => void
+    expect(typeof changed).toBe('function')
+    expect(applied).toEqual([])
+
+    // DSH re-emits on every describe() read, not only on a write, and
+    // `runtime.reconfigure` invalidates each session's profile delivery — so
+    // another row's event, and a re-emission of an unchanged snapshot, must
+    // not reach it.
+    recallLimit = 20
+    changed('some-other-entry', 1)
+    changed(OPENVIKING_ENTRY_ID, 1)
+    expect(applied).toEqual([['[openviking:dsh] settings applied']])
+
+    changed(OPENVIKING_ENTRY_ID, 2)
+    expect(applied).toHaveLength(1)
+
+    // A refused value keeps the previous config and never throws out of the
+    // event dispatch: an optional memory backend must not break settings.
+    recallLimit = 30
+    read = () => { throw new Error('volatile read failed') }
+    expect(() => { changed(OPENVIKING_ENTRY_ID, 3) }).not.toThrow()
+    expect(refused).toEqual([
+      ['[openviking:dsh] keeping previous config after a refused settings change: %s', 'volatile read failed'],
+    ])
+    expect(applied).toHaveLength(1)
   })
 })

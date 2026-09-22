@@ -28,7 +28,7 @@ const FORBIDDEN_PATTERN = new RegExp([
  * release and the stage are named here. Peers below are asserted to be a
  * `^<DSH_RELEASE>-<stage>.N` caret range and devDependencies a concrete pin.
  */
-const DSH_RELEASE = '0.1.6'
+const DSH_RELEASE = '0.1.7'
 const DSH_STAGE = 'alpha'
 const DSH_RELEASE_PATTERN = DSH_RELEASE.replaceAll('.', '\\.')
 const DSH_VERSION_PATTERN = `${DSH_RELEASE_PATTERN}-${DSH_STAGE}\\.(\\d+)`

@@ -12,6 +12,16 @@ import {
 } from './shared/capture-utils.ts'
 import type { OpenVikingConfig } from './config.ts'
 
+/**
+ * Message-source kind this plugin declares for the durable context messages it
+ * injects.
+ *
+ * DSH 0.1.7 removed the shared catch-all `plugin` source kind ("each producer
+ * declares its own `kind` in its own module"), so the producer name IS the
+ * kind: `runtime.ts` merges this literal into `MessageSourceMap` and stamps it
+ * on every profile/recall message, and {@link promptText} uses it to keep this
+ * plugin's own injections out of the query it builds from the message batch.
+ */
 export const OPENVIKING_PLUGIN_SOURCE = 'openviking-memory'
 
 export interface CaptureToolState {
@@ -57,16 +67,20 @@ function captureMessage(
   config: OpenVikingConfig,
   toolNames: Map<string, string>,
 ): Record<string, unknown> | null {
-  // Whitelist by source: plugin-injected user messages (this plugin's recall
-  // blocks, time-context snapshots, any other plugin's context) are model
-  // input, not human input — mirroring them would launder synthetic text
-  // into memory as if a person said it.
+  // Whitelist by role and source kind: only genuine human input — plus, when
+  // the settings allow, assistant turns and tool results — enters memory.
+  // DSH 0.1.7 replaced the single shared `plugin` source kind with one kind per
+  // producer (`agent-instructions`, `time-context`, `openviking-memory`, …), so
+  // the rule can no longer be "skip `plugin`": anything that is not the user's
+  // own message is model input, and mirroring it would launder synthetic text
+  // into memory as if a person had said it.
   const source = message.source as Record<string, unknown> | undefined
-  if (source?.kind === 'plugin') return null
-  if (message.role === 'assistant' && config.captureAssistantTurns === false) {
-    return null
-  }
-  if (source?.kind === 'tool' && config.captureToolResults !== true) {
+  const kind = typeof source?.kind === 'string' ? source.kind : undefined
+  if (message.role === 'assistant') {
+    if (config.captureAssistantTurns === false) return null
+  } else if (kind === 'tool') {
+    if (config.captureToolResults !== true) return null
+  } else if (kind !== 'user') {
     return null
   }
 
@@ -104,10 +118,9 @@ function captureMessage(
 export function promptText(messages: ReadonlyArray<unknown> | null | undefined): string {
   return (messages || [])
     .map(message => message as Record<string, unknown> | undefined)
-    .filter(message => !(
+    .filter(message => (
       message
-      && (message.source as Record<string, unknown> | undefined)?.kind === 'plugin'
-      && (message.source as Record<string, unknown>).plugin === OPENVIKING_PLUGIN_SOURCE
+      && (message.source as Record<string, unknown> | undefined)?.kind !== OPENVIKING_PLUGIN_SOURCE
     ))
     .map(message => extractTextFromPayload(message))
     .filter(Boolean)

@@ -31,18 +31,20 @@ describe('captureEvent', () => {
       data: {
         role: 'user',
         content: [{ type: 'text', text: '<openviking-context>blue</openviking-context>' }],
-        source: { kind: 'plugin', plugin: 'openviking-memory', form: 'recall' },
+        source: { kind: 'openviking-memory', form: 'recall' },
       },
     }, CONFIG)
     expect(injected).toBeNull()
 
-    // Every plugin's injections stay out of memory, not just this plugin's.
+    // Every producer's injections stay out of memory, not just this plugin's:
+    // DSH 0.1.7 gives each producer its own source kind, so the guard is
+    // "human input only" rather than "skip the shared plugin kind".
     const otherPlugin = captureEvent({
       type: 'user/message',
       data: {
         role: 'user',
         content: [{ type: 'text', text: 'Time sampled while preparing turn 3' }],
-        source: { kind: 'plugin', plugin: 'time-context', form: 'snapshot' },
+        source: { kind: 'time-context', form: 'snapshot' },
       },
     }, CONFIG)
     expect(otherPlugin).toBeNull()
@@ -133,12 +135,12 @@ describe('captureEvent', () => {
       {
         role: 'user',
         content: [{ type: 'text', text: 'old recall' }],
-        source: { kind: 'plugin', plugin: 'openviking-memory' },
+        source: { kind: 'openviking-memory', form: 'recall' },
       },
       {
         role: 'user',
         content: [{ type: 'text', text: 'background job completed' }],
-        source: { kind: 'plugin', plugin: 'job-controller', form: 'notice', summary: 'done' },
+        source: { kind: 'job-controller', form: 'notice', summary: 'done' },
       },
     ])).toBe('Current question\n\nbackground job completed')
   })

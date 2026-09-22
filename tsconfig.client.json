@@ -32,7 +32,10 @@
       "@deepseek-ai/dsh-credentials/types": ["./node_modules/@deepseek-ai/dsh-credentials/lib/types/types.d.ts"],
       "@deepseek-ai/dsh-settings/types": ["./node_modules/@deepseek-ai/dsh-settings/lib/types/types.d.ts"],
       "@deepseek-ai/dsh-client-ui-settings/client": ["./node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-locale/client": ["./node_modules/@deepseek-ai/dsh-client-locale/lib/types/client/index.d.ts"]
+      "@deepseek-ai/dsh-client-ui-plugin-manager/client": ["./node_modules/@deepseek-ai/dsh-client-ui-plugin-manager/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-locale/client": ["./node_modules/@deepseek-ai/dsh-client-locale/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-gateway/client": ["./node_modules/@deepseek-ai/dsh-api-gateway/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-api-settings-controller/remote": ["./node_modules/@deepseek-ai/dsh-api-settings-controller/lib/typert.remote-client.d.ts"]
     }
   },
   "include": ["src/client/**/*.ts", "src/client/**/*.tsx"],

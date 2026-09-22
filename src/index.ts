@@ -22,35 +22,44 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session'
+// Type-only: activates the `settings/document-updated` Events merge this plugin
+// listens on. The settings service itself is never injected — DSH 0.1.7 removed
+// that seam, and the entry config arrives as this plugin's own config.
+import type {} from '@deepseek-ai/dsh-settings'
 import { OpenVikingClient } from './ov-client.ts'
 import {
   Config,
-  OPENVIKING_SETTINGS_NAMESPACE,
+  OPENVIKING_ENTRY_ID,
+  plainConfigInput,
   resolveConfig,
-  type OpenVikingSettings,
+  type OpenVikingEntryConfig,
 } from './config.ts'
 import { injectStartupProfile } from './lifecycle.ts'
 import { OpenVikingRuntime } from './runtime.ts'
 import { registerOpenVikingSkillProvider } from './skill-provider.ts'
 import { registerOpenVikingTools } from './tools.ts'
 import { guardVikingUri } from './uri-guard.ts'
-import { installOpenVikingWeb, OpenVikingWebBackend } from './web.ts'
 
 export const name = 'openviking-memory'
 export const inject = ['agents', 'sessions', 'tools', 'skills', 'credentials']
 
-export { Config, OPENVIKING_SETTINGS_NAMESPACE }
+export { Config, OPENVIKING_ENTRY_ID }
 
-/** Plugin entry: register settings, then mount the runtime and lifecycle hooks. */
-export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): () => void {
-  // The active configuration source: the resolved `openviking` settings section
-  // while a settings service is mounted, the composition entry otherwise. The
-  // settings dependency is deliberately OPTIONAL (the `settings.installSection`
-  // wiring rides a `ctx.inject(['settings'])` fiber): on host profiles without
-  // a settings provider the plugin must still activate and run on the entry
-  // config instead of hanging the boot report on a missing `settings` service.
-  let source: () => Partial<OpenVikingSettings> = () => input
+/** Plugin entry: mount the runtime and lifecycle hooks over this row's config. */
+export function apply(ctx: Context, input: OpenVikingEntryConfig = {}): () => void {
+  // DSH 0.1.7 hands the row's resolved config straight to the plugin and keeps
+  // every `.volatile()` field's reference live underneath it, so there is no
+  // settings service to register with and no namespace to own: the config IS
+  // the profile patch row. `resolveConfig` snapshots the references at one
+  // moment; `settings/document-updated` is what turns a later write into a
+  // fresh snapshot (see below).
   let config = resolveConfig(input)
+
+  // Signature of the last snapshot actually applied. The settings service
+  // re-emits on every `describe()` read, not only on a write, and
+  // `runtime.reconfigure` invalidates each session's profile delivery — so a
+  // no-op change must not reach it.
+  let appliedSignature = JSON.stringify(plainConfigInput(input))
 
   // The Bearer key never rides the settings document or the plugin config: it
   // is resolved once per request from the DSH credential store under the
@@ -76,23 +85,30 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
 
   registerOpenVikingTools(ctx, runtime.client, runtime)
 
-  // Optional Web routes: the browser Settings section reads the credential
-  // status snapshot and writes a new API key through ctx.credentials.
-  installOpenVikingWeb(ctx, new OpenVikingWebBackend(ctx))
-
-  // Re-derive the full config and push it into the runtime whenever the source
-  // changes (settings attach/detach/commit). Reads ride `config`, so the skill
-  // provider below always sees the latest values.
+  // Re-derive the full config and push it into the runtime whenever the entry
+  // config changes. DSH updates each volatile reference in place and announces
+  // the owning row on `settings/document-updated`; every other row's event is
+  // ignored. Reads ride `config`, so the skill provider below always sees the
+  // latest values.
   const applyConfig = (): void => {
     try {
-      config = resolveConfig(source())
+      // Reading the references can itself fail (a reference whose owner has
+      // gone away), so the signature is taken inside the guard: nothing may
+      // reach out of an event dispatch from an optional memory backend.
+      const signature = JSON.stringify(plainConfigInput(input))
+      if (signature === appliedSignature) return
+      config = resolveConfig(input)
       runtime.reconfigure(config)
+      appliedSignature = signature
       ctx.logger.info('[openviking:dsh] settings applied')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       ctx.logger.warn('[openviking:dsh] keeping previous config after a refused settings change: %s', message)
     }
   }
+  ctx.on('settings/document-updated', (ns) => {
+    if (ns === OPENVIKING_ENTRY_ID) applyConfig()
+  })
 
   // Inject skills saved in OpenViking into the DSH skill catalog (provider
   // name `openviking`). Disabled by the `injectSkills` setting; the provider
@@ -107,23 +123,6 @@ export function apply(ctx: Context, input: Partial<OpenVikingSettings> = {}): ()
       'openvikingMemory.skillProvider',
     )
   }
-
-  // Optional settings wiring: register the `openviking` namespace and reapply
-  // on change when a settings service exists (desktop/host profiles); on
-  // profiles without one the plugin keeps the composition entry config, so
-  // activation never blocks on the service. DSH 0.1.2-rc.1 replaced the
-  // standalone `installSettingsSection` with `SettingsProvider.installSection`
-  // (same hooks contract), so the optional seam is expressed with `ctx.inject`
-  // exactly like the old helper did internally.
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, OPENVIKING_SETTINGS_NAMESPACE, Config, input as OpenVikingSettings, {
-      // `onChange` runs right after `setSource` on attach/detach, so re-deriving
-      // only there (never here) avoids a redundant double re-apply at startup.
-      setSource: (next) => { source = next },
-      onChange: applyConfig,
-      validate: (value) => { resolveConfig(value) },
-    })
-  })
 
   // The profile lands through `agent/created`, which DSH dispatches as a
   // SERIAL event: listeners run in order and are awaited before creation

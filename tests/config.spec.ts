@@ -1,7 +1,55 @@
 import { describe, expect, it } from 'vitest'
-import { resolveConfig, DEFAULT_OPENVIKING_CREDENTIAL } from '../src/config.ts'
+import {
+  Config,
+  OPENVIKING_ENTRY_ID,
+  plainConfigInput,
+  resolveConfig,
+  DEFAULT_OPENVIKING_CREDENTIAL,
+} from '../src/config.ts'
+
+describe('Config schema', () => {
+  it('is the entry-config schema DSH projects a configuration form from', () => {
+    // DSH 0.1.7 builds a form from exactly the fields a row's Config declares
+    // `.volatile()`; a field that lost its `.volatile()` silently disappears
+    // from the UI and stops being live-editable, so pin the shape here.
+    const resolved = Config({}) as Record<string, unknown>
+    const fields = Object.keys(resolved)
+    expect(fields.length).toBeGreaterThan(20)
+    for (const field of fields) {
+      expect(typeof (resolved[field] as { get?: unknown } | undefined)?.get, `${field} is volatile`).toBe('function')
+    }
+
+    // The config form is addressed by the profile row id, not by a settings
+    // namespace: keep the declared row id and the constant in step.
+    expect(OPENVIKING_ENTRY_ID).toBe('openviking-memory-runtime')
+  })
+})
+
+describe('plainConfigInput', () => {
+  it('snapshots volatile references and drops absent fields', () => {
+    const resolved = Config({}) as Record<string, { get: () => unknown }>
+    const plain = plainConfigInput({ ...resolved, account: undefined })
+    expect(plain.endpoint).toBe('http://127.0.0.1:1933')
+    expect(plain.recallLimit).toBe(10)
+    expect(Object.prototype.hasOwnProperty.call(plain, 'account')).toBe(false)
+  })
+})
+
+/** Build one volatile reference in the exact shape `@deepseek-ai/cosmokit` produces. */
+function volatile<T>(value: T): { get: () => T } {
+  return Object.freeze({ get: () => value, [Symbol.for('cosmokit.volatile.write')]: () => {} })
+}
 
 describe('resolveConfig', () => {
+  it('accepts the loader\'s volatile references as well as plain values', () => {
+    const config = resolveConfig({ recallLimit: volatile(5), endpoint: volatile('http://ov.local/') })
+    expect(config.recallLimit).toBe(5)
+    expect(config.endpoint).toBe('http://ov.local')
+    // Presence rides the reference, so a live `recallLimit` is "configured"
+    // even though the reference was handed in rather than a plain value.
+    expect(config.recallLimitConfigured).toBe(true)
+  })
+
   it('ignores OPENVIKING_* env vars and config files entirely (settings-only)', () => {
     // resolveConfig no longer takes an env argument: values come only from the
     // settings document plus built-in defaults.
