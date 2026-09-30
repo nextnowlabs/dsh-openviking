@@ -15,7 +15,7 @@
 
 ## 环境要求
 
-- `@deepseek-ai/dsh` `0.1.7-alpha.1` 或更新的 `0.1.7-alpha.N` 版本
+- `@deepseek-ai/dsh` `0.2.0-rc.2` 或更新的 `0.2.x` 版本（peer 声明为 `^0.2.0-rc.2`）
 - Node.js `^22.19.0` 或 `>=24`
 - 可访问的 OpenViking 服务器
 
@@ -45,7 +45,7 @@ dsh --profile web --dump-config
 
 OpenViking 的配置在 **DSH Web → 设置 → 插件 → OpenViking Memory** 页面中完成；未填写的字段使用内置默认值。
 
-该页面是插件的配置入口：它把用户填写的值暂存（staged），点击「保存」时一次性以修订号（revision）为栅栏写入，未保存的编辑会在离开页面时丢弃。DSH 0.1.7 的配置模型是**补丁即配置**——插件不再注册设置命名空间，配置写回 profile 补丁中本插件那一行的 `config`；行 id 为 `openviking-memory-runtime`（由本包的 `cordis.patch.yml` 声明），DSH 就用这个 id 寻址配置表单、`settings/document-updated` 事件与浏览器页面。运行时持有的每个字段都是 DSH 维护的 volatile 引用，写入后插件在收到该行的事件时重新解析整份配置并热应用。
+该页面是插件的配置入口：它把用户填写的值暂存（staged），点击「保存」时一次性以修订号（revision）为栅栏写入，未保存的编辑会在离开页面时丢弃。DSH 0.1.7 起，配置模型是**补丁即配置**——插件不再注册设置命名空间，配置写回 profile 补丁中本插件那一行的 `config`；行 id 为 `openviking-memory-runtime`（由本包的 `cordis.patch.yml` 声明），DSH 就用这个 id 寻址配置表单、`settings/document-updated` 事件与浏览器页面。运行时持有的每个字段都是 DSH 维护的 volatile 引用，写入后插件在收到该行的事件时重新解析整份配置并热应用。
 
 下表列出全部设置字段；「界面」列为 ✓ 表示可直接在上述页面中编辑，其余字段可在 profile 补丁的该行 `config` 中提供。
 
@@ -185,6 +185,16 @@ pnpm run typecheck    # server + client 的 no-emit 类型检查
 - **消息来源不再有通用 `plugin` 种类**：每个生产者声明自己的 `MessageSourceMap` 条目。本插件声明 `openviking-memory`，捕获侧的白名单也从「跳过 plugin」改为「只收人类输入」。
 - **浏览器设置页走 `plugins.item` 槽位**：旧的 `settings.plugin.item` 卡片、`ctx.settingsScope` 与 `/_dsh/openviking/settings` 同源路由均已移除。页面以 `view: 'summary' | 'page'` 渲染，配置读写走 `ctx.configForms`，API 密钥读写走 DSH 的 Remote 凭据域（`credentials/describe`、`credentials/set`）。
 - **`dsh-host-webserver` 依赖已随该路由一并移除**。
+
+### DSH 0.2.0-rc.2 适配要点
+
+0.2.0-rc.2 引入了 **peer 兼容性门禁**，本插件随之改动如下：
+
+- **`@deepseek-ai/dsh-*` 的 peer 范围会被运行时校验**。`evaluatePluginCompatibility()`（`@deepseek-ai/dsh-app-boot`）把清单里每个 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 的 peer 范围与运行中的 DSH 版本比对：安装/升级时插件管理器以 `incompatible-version` **拒绝安装**（`dsh: installation rejected: ...` / `nothing was installed`）；对**已安装**的插件，profile 启动会**跳过该 bundle 不加载**（`dsh: skipping profile bundle ...`），插件列表页同样报 `incompatible-version`。唯一放行方式是按「插件@版本 × DSH 版本」精确豁免：`dsh plugin allow-version <pkg@version> --dsh-version <exact> --accept-risk`。因此留在旧版本线上的 peer 会让包在新 DSH 上装不上——本包的 peer 已全部改为 `^0.2.0-rc.2`，`engines.dsh` 声明同一条线，`tests/bundle.spec.ts` 会从 devDependency 的固定版本反推出当前版本线，并断言每个 peer 都覆盖该固定版本，避免下次升级时漏改。
+- **`engines.dsh` 是新增的声明式字段**（`DshEnginesManifest.dsh`），目前没有任何读取方强制执行，仅作兼容性声明。
+- **`dsh.client.external` 是新增的客户端清单字段**（精确的模块表请求，位于隐式基线之外）。本插件不声明它：浏览器包在运行时只 `require` `react/jsx-runtime` 与 `@deepseek-ai/dsh-client-ui-primitives`，两者都在 0.2.0-rc.2 的隐式基线内（`react`、`react/jsx-runtime`、`react-dom`、`react-dom/client`、`cordis`、`dsh-client-store`、`dsh-client-ui-slots`、`dsh-client-ui-primitives`、`dsh-client-ui-dockkit`）。
+- **依赖版本随之提升**：`@deepseek-ai/cordis` `4.0.3 → 4.0.4`、`@deepseek-ai/schemastery` `3.18.3 → 3.18.4`；`pnpm-workspace.yaml` 的 `allowBuilds` 与 `minimumReleaseAgeExclude` 按 lockfile 实际解析结果重新生成。
+- **其余用到的 API 保持兼容**：`dsh-agent`、`dsh-settings`、`dsh-skill`、`dsh-credentials`、`dsh-client-ui-slots`、`dsh-client-store`、`dsh-client-ui-settings`（`ctx.configForms`）、`plugins.item` 槽位契约在两个版本间**逐字节相同**；`dsh-tools`、`dsh-llm`、`dsh-session` 只有新增（`ToolDefinition.projectContent`、`PreToolDecision.ask.displayReason`、`ToolUpdate`/`ToolHistory`/`Session.toolHistory()`），本插件未使用，无需改动。
 
 ## 发布
 
